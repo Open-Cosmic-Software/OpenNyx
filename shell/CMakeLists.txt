@@ -16,6 +16,12 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release)
 
 project(opennyx LANGUAGES CXX)
 
+# The Windows resource script (app icon + version info) needs the RC
+# language.
+if(WIN32)
+  enable_language(RC)
+endif()
+
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 
 # Use folders in IDEs that support it.
@@ -76,7 +82,7 @@ set(OPENNYX_SRCS
 )
 
 if(OS_WINDOWS)
-  list(APPEND OPENNYX_SRCS src/main_win.cc)
+  list(APPEND OPENNYX_SRCS src/main_win.cc win/opennyx.rc)
 endif()
 
 set(CEF_TARGET "opennyx")
