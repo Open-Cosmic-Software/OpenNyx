@@ -9,6 +9,21 @@ services.
 
 > 🚧 **Early development.** Windows first, macOS and Linux to follow.
 
+## What works today (M2)
+
+- Real Chromium (CEF 150) with a custom dark UI: **tab strip, toolbar,
+  address bar** — built with the CEF Views framework, no Chrome UI
+  dependencies.
+- **Multi-tab browsing**: new tab (`Ctrl+T` / `+` button), close tab
+  (`Ctrl+W` / `×`), switch (`Ctrl+Tab`, click).
+- **Brave Search by default**: type a URL to navigate, anything else
+  searches Brave. Dark new-tab page with a centered search box.
+- Shortcuts: `Ctrl+L` address bar, `F5`/`Ctrl+R` reload, `Alt+←/→`
+  history, `Ctrl+Shift+I` DevTools. Full list in
+  [`docs/BUILD-STATUS.md`](docs/BUILD-STATUS.md).
+- Privacy defaults: no Google API keys, metrics/crash reporting disabled,
+  no background phone-home switches.
+
 ## Why OpenNyx?
 
 - 🔒 **Privacy by default** — no Google pings, no telemetry, tracker & ad blocking built in, DNS-over-HTTPS out of the box
@@ -37,9 +52,9 @@ the pinned CEF version) and the project maintainable for a small crew.
 ## Roadmap
 
 - [x] Project setup
-- [ ] M1 — **in progress**: real Chromium (CEF) embedded, window, tabs, navigation, Windows CI artifact
-- [ ] M2 — Shell: omnibox, command palette, dark theme, settings
-- [ ] M3 — Privacy layer: blocker, fingerprint protection, DoH
+- [x] M1 — real Chromium (CEF) embedded, window, navigation, Windows CI artifact
+- [x] M2 — **shipped**: custom dark UI (tab strip, toolbar, address bar), multi-tab, Brave Search default, new-tab page, keyboard shortcuts, app icon
+- [ ] M3 — Privacy layer: blocker, fingerprint protection, DoH; command palette, settings
 - [ ] M4 — Dev tools: JSON viewer, request inspector, API client
 - [ ] M5 — macOS & Linux builds
 - [ ] M6 — Auto-updates & release pipeline
