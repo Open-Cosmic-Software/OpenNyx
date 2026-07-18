@@ -67,6 +67,8 @@ add_subdirectory(${CEF_LIBCEF_DLL_WRAPPER_PATH} libcef_dll_wrapper)
 #
 
 set(OPENNYX_SRCS
+  src/browser_window.cc
+  src/browser_window.h
   src/opennyx_app.cc
   src/opennyx_app.h
   src/opennyx_client.cc
@@ -95,6 +97,9 @@ if(OS_WINDOWS)
 
   target_include_directories(${CEF_TARGET} PRIVATE
                              "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+  # Source files contain UTF-8 string literals (button glyphs).
+  target_compile_options(${CEF_TARGET} PRIVATE "/utf-8")
 
   # Embed the application manifests (common controls + supported OS list).
   ADD_WINDOWS_MANIFEST("${CMAKE_CURRENT_SOURCE_DIR}/win" "${CEF_TARGET}" "exe")

@@ -7,10 +7,6 @@
 
 #include "include/cef_app.h"
 
-// Default start page. OpenNyx is Google-free: DuckDuckGo is the default
-// start/search page.
-inline constexpr char kOpenNyxStartPage[] = "https://duckduckgo.com";
-
 // Application-level callbacks for the browser process.
 //
 // OpenNyxApp is responsible for:

@@ -13,84 +13,8 @@
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 
+#include "browser_window.h"
 #include "opennyx_client.h"
-
-namespace {
-
-// Delegate for the top-level CefWindow that hosts the browser view.
-class OpenNyxWindowDelegate : public CefWindowDelegate {
- public:
-  explicit OpenNyxWindowDelegate(CefRefPtr<CefBrowserView> browser_view)
-      : browser_view_(browser_view) {}
-
-  OpenNyxWindowDelegate(const OpenNyxWindowDelegate&) = delete;
-  OpenNyxWindowDelegate& operator=(const OpenNyxWindowDelegate&) = delete;
-
-  void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    window->SetTitle("OpenNyx");
-    window->AddChildView(browser_view_);
-    window->Show();
-
-    // Give keyboard focus to the browser view.
-    browser_view_->RequestFocus();
-  }
-
-  void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
-    browser_view_ = nullptr;
-  }
-
-  bool CanClose(CefRefPtr<CefWindow> window) override {
-    // Allow the window to close if the browser says it's OK.
-    CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
-    if (browser) {
-      return browser->GetHost()->TryCloseBrowser();
-    }
-    return true;
-  }
-
-  CefSize GetPreferredSize(CefRefPtr<CefView> view) override {
-    return CefSize(1200, 800);
-  }
-
- private:
-  CefRefPtr<CefBrowserView> browser_view_;
-
-  IMPLEMENT_REFCOUNTING(OpenNyxWindowDelegate);
-};
-
-// Delegate for the browser view. Enables the Chrome toolbar (back/forward/
-// reload buttons + address bar) provided by the Chrome runtime style.
-class OpenNyxBrowserViewDelegate : public CefBrowserViewDelegate {
- public:
-  OpenNyxBrowserViewDelegate() = default;
-
-  OpenNyxBrowserViewDelegate(const OpenNyxBrowserViewDelegate&) = delete;
-  OpenNyxBrowserViewDelegate& operator=(const OpenNyxBrowserViewDelegate&) =
-      delete;
-
-  bool OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView> browser_view,
-                                 CefRefPtr<CefBrowserView> popup_browser_view,
-                                 bool is_devtools) override {
-    // Create a new top-level window for popups (and DevTools). It will show
-    // itself after creation.
-    CefWindow::CreateTopLevelWindow(
-        new OpenNyxWindowDelegate(popup_browser_view));
-    return true;  // We created the window.
-  }
-
-  ChromeToolbarType GetChromeToolbarType(
-      CefRefPtr<CefBrowserView> browser_view) override {
-    // Show the full Chrome toolbar: back/forward/reload + omnibox. This is
-    // real Chromium toolbar code, not a re-implementation. M2 will replace
-    // this with the custom OpenNyx shell UI (tab strip, command palette).
-    return CEF_CTT_NORMAL;
-  }
-
- private:
-  IMPLEMENT_REFCOUNTING(OpenNyxBrowserViewDelegate);
-};
-
-}  // namespace
 
 OpenNyxApp::OpenNyxApp() = default;
 
@@ -128,27 +52,18 @@ void OpenNyxApp::OnContextInitialized() {
   CefRefPtr<CefCommandLine> command_line =
       CefCommandLine::GetGlobalCommandLine();
 
-  // OpenNyxClient implements browser-level callbacks.
+  // OpenNyxClient implements browser-level callbacks shared by all tabs.
+  // The instance is retrieved via OpenNyxClient::GetInstance() when tabs
+  // are created.
   CefRefPtr<OpenNyxClient> client(new OpenNyxClient());
 
-  // Browser settings (defaults are fine for M1).
-  CefBrowserSettings browser_settings;
+  // Allow overriding the start page with --url=... for testing; the default
+  // is the built-in dark new-tab page with a Brave Search box.
+  const std::string url = command_line->GetSwitchValue("url");
 
-  // Allow overriding the start page with --url=... for testing; default is
-  // DuckDuckGo (Google-free).
-  std::string url = command_line->GetSwitchValue("url");
-  if (url.empty()) {
-    url = kOpenNyxStartPage;
-  }
-
-  // Create the browser view using the Views framework with the Chrome
-  // runtime style (real Chromium toolbar, DevTools, context menus).
-  CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-      client, url, browser_settings, nullptr, nullptr,
-      new OpenNyxBrowserViewDelegate());
-
-  // Create the top-level window. It shows itself after creation.
-  CefWindow::CreateTopLevelWindow(new OpenNyxWindowDelegate(browser_view));
+  // Create the main browser window (tab strip + toolbar + first tab) using
+  // the CEF Views framework. It shows itself after creation.
+  BrowserWindow::Create(url);
 }
 
 CefRefPtr<CefClient> OpenNyxApp::GetDefaultClient() {
