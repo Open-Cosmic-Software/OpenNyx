@@ -1,0 +1,19 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Rust / Tauri
+target/
+shell/src-tauri/target/
+**/*.rs.bk
+
+# Tauri build output
+shell/src-tauri/gen/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

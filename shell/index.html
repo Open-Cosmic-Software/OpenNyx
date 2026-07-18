@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenNyx</title>
+    <link rel="stylesheet" href="src/styles.css" />
+  </head>
+  <body>
+    <!-- Tab strip -->
+    <header id="chrome">
+      <div id="tabs" role="tablist"></div>
+      <button id="new-tab" title="New tab (Ctrl+T)">+</button>
+    </header>
+
+    <!-- Omnibox / toolbar -->
+    <nav id="toolbar">
+      <button id="back" title="Back">‹</button>
+      <button id="forward" title="Forward">›</button>
+      <button id="reload" title="Reload">⟳</button>
+      <input
+        id="omnibox"
+        type="text"
+        placeholder="Search privately or enter a URL"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </nav>
+
+    <!-- Content host. In M1 the active tab's webview is placed here by the
+         Rust side (multi-webview, unstable). This div is the layout anchor. -->
+    <main id="content-host">
+      <div id="placeholder">
+        <h1>OpenNyx</h1>
+        <p>M1 prototype — a Google-free browser shell.</p>
+      </div>
+    </main>
+
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>
