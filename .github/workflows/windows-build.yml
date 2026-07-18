@@ -1,0 +1,57 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "shell/**"
+      - ".github/workflows/windows-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-win64:
+    name: Build OpenNyx (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The extracted CEF binary distribution is ~1.5 GB; cache it so
+      # subsequent builds skip the download + extraction.
+      - name: Cache CEF binary distribution
+        uses: actions/cache@v4
+        with:
+          path: shell/third_party/cef
+          key: cef-win64-150.0.11
+
+      - name: Configure (CMake, Visual Studio 2022, x64)
+        run: cmake -S shell -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --target opennyx --parallel
+
+      - name: Prepare artifact
+        shell: pwsh
+        run: |
+          $out = "build/Release"
+          if (-not (Test-Path "$out/opennyx.exe")) {
+            Write-Error "opennyx.exe not found in $out"
+            Get-ChildItem -Recurse build -Filter *.exe | Select-Object FullName
+            exit 1
+          }
+          # Remove the downloaded CEF archive leftovers if any ended up in out dir.
+          Get-ChildItem $out
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item -Recurse "$out/*" dist/
+          # Drop debug-only leftovers to keep the zip lean.
+          Remove-Item -ErrorAction SilentlyContinue dist/*.pdb, dist/*.lib, dist/*.exp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenNyx-win64
+          path: dist/
+          if-no-files-found: error
+          compression-level: 6

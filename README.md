@@ -2,7 +2,10 @@
 
 **A beautiful, Google-free browser for developers and privacy lovers.**
 
-OpenNyx is built on top of [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium) — full Chromium compatibility, zero Google services, zero telemetry.
+OpenNyx is built on **CEF (Chromium Embedded Framework)** — real, full
+Chromium that we embed and control: no Google API keys, no metrics, no crash
+reporting, no background phone-home. Full web compatibility, zero Google
+services.
 
 > 🚧 **Early development.** Windows first, macOS and Linux to follow.
 
@@ -21,19 +24,20 @@ OpenNyx is built on top of [ungoogled-chromium](https://github.com/ungoogled-sof
 │           OpenNyx Shell (UI)          │   ← our code: tabs, omnibox,
 │   command palette · themes · tools    │     dev tools, privacy dashboard
 ├───────────────────────────────────────┤
-│       Engine: ungoogled-chromium      │   ← upstream, de-googled
-│     (Blink · V8 · full web compat)    │
+│      Engine: Chromium via CEF         │   ← prebuilt CEF binary distro,
+│     (Blink · V8 · full web compat)    │     privacy-hardened switches
 └───────────────────────────────────────┘
 ```
 
-We deliberately do **not** fork Chromium itself. The engine stays upstream
-(ungoogled-chromium), we build the shell, features and experience on top.
-That keeps security updates fast and the project maintainable.
+We deliberately do **not** fork Chromium itself. We consume the official
+prebuilt CEF binary distributions and apply ungoogled-chromium-style hardening
+via the command line and shell code. That keeps security updates fast (bump
+the pinned CEF version) and the project maintainable for a small crew.
 
 ## Roadmap
 
 - [x] Project setup
-- [ ] M1 — Prototype: engine embedded, basic window, tabs, navigation (Windows)
+- [ ] M1 — **in progress**: real Chromium (CEF) embedded, window, tabs, navigation, Windows CI artifact
 - [ ] M2 — Shell: omnibox, command palette, dark theme, settings
 - [ ] M3 — Privacy layer: blocker, fingerprint protection, DoH
 - [ ] M4 — Dev tools: JSON viewer, request inspector, API client
@@ -42,7 +46,16 @@ That keeps security updates fast and the project maintainable.
 
 ## Building
 
-Coming with M1. Windows builds will be provided as CI artifacts.
+See [`shell/README.md`](shell/README.md). Short version (Windows x64,
+VS 2022 + CMake):
+
+```powershell
+cmake -S shell -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release --target opennyx --parallel
+```
+
+Every push to `main` also builds on GitHub Actions (`windows-latest`) and
+uploads a ready-to-run **OpenNyx-win64** artifact (unzip → `opennyx.exe`).
 
 ## License
 
