@@ -64,7 +64,6 @@ constexpr cef_color_t kColorTabActive = CefColorSetARGB(255, 48, 50, 60);
 constexpr cef_color_t kColorTabInactive = CefColorSetARGB(255, 28, 29, 35);
 constexpr cef_color_t kColorText = CefColorSetARGB(255, 225, 226, 232);
 constexpr cef_color_t kColorTextDim = CefColorSetARGB(255, 150, 152, 160);
-constexpr cef_color_t kColorAccent = CefColorSetARGB(255, 122, 92, 255);
 constexpr cef_color_t kColorFieldBg = CefColorSetARGB(255, 16, 17, 21);
 
 constexpr int kDefaultWidth = 1280;
@@ -733,11 +732,10 @@ void BrowserWindow::BuildUI() {
   address_bar_ = CefTextfield::CreateTextfield(this);
   address_bar_->SetID(ID_ADDRESS_BAR);
   address_bar_->SetFontList(kFontList);
+  // Note: SetTextColor/SetPlaceholderTextColor/SetSelectionBackgroundColor
+  // were removed in CEF API 15000; textfield colors now follow the theme.
   address_bar_->SetBackgroundColor(kColorFieldBg);
-  address_bar_->SetTextColor(kColorText);
   address_bar_->SetPlaceholderText("Search with Brave or enter address");
-  address_bar_->SetPlaceholderTextColor(kColorTextDim);
-  address_bar_->SetSelectionBackgroundColor(kColorAccent);
 
   toolbar_->AddChildView(back_button_);
   toolbar_->AddChildView(forward_button_);

@@ -29,8 +29,7 @@
 class BrowserWindow : public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public CefTextfieldDelegate,
-                      public CefButtonDelegate,
-                      public CefPanelDelegate {
+                      public CefButtonDelegate {
  public:
   // Creates the singleton main window with an initial tab showing |url|
   // (empty = new-tab page).
