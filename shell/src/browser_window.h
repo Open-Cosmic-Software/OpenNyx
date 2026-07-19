@@ -82,6 +82,14 @@ class BrowserWindow : public CefWindowDelegate,
   // ---- CefWindowDelegate ----
   void OnWindowCreated(CefRefPtr<CefWindow> window) override;
   void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
+  // Frameless: OpenNyx draws its own title bar (window controls live in the
+  // tab strip). The OS frame/caption is removed.
+  bool IsFrameless(CefRefPtr<CefWindow> window) override { return true; }
+  bool CanResize(CefRefPtr<CefWindow> window) override { return true; }
+  bool CanMaximize(CefRefPtr<CefWindow> window) override { return true; }
+  bool CanMinimize(CefRefPtr<CefWindow> window) override { return true; }
+  void OnWindowBoundsChanged(CefRefPtr<CefWindow> window,
+                             const CefRect& new_bounds) override;
   void OnThemeColorsChanged(CefRefPtr<CefWindow> window,
                             bool chrome_theme) override;
   bool CanClose(CefRefPtr<CefWindow> window) override;
@@ -152,6 +160,9 @@ class BrowserWindow : public CefWindowDelegate,
   void MaybeCloseWindow();
   void UpdateTabStrip();
   void UpdateWindowTitle();
+  // Marks the empty caption area (drag spacer) as an OS-draggable region so a
+  // frameless window can still be moved by dragging the top bar.
+  void UpdateDraggableRegions();
   void FocusAddressBar();
   void NavigateActiveTab(const std::string& input);
 
@@ -167,6 +178,12 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefLabelButton> star_button_;    // bookmark toggle.
   CefRefPtr<CefLabelButton> shield_button_;  // blocked-request count.
   CefRefPtr<CefLabelButton> menu_button_;    // opens settings.
+  // Frameless window controls.
+  CefRefPtr<CefPanel> caption_spacer_;  // flexible drag area
+  CefRefPtr<CefLabelButton> minimize_button_;
+  CefRefPtr<CefLabelButton> maximize_button_;
+  CefRefPtr<CefLabelButton> close_window_button_;
+  bool is_maximized_ = false;
 
   // Updates the star (filled/hollow) + shield count from the active tab URL.
   void UpdateChrome();

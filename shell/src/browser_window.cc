@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "include/cef_color_ids.h"
 #include "include/cef_cookie.h"
@@ -46,6 +47,11 @@ enum ViewID {
   ID_STAR_BUTTON,
   ID_SHIELD_BUTTON,
   ID_MENU_BUTTON,
+  // Frameless window controls (drawn by OpenNyx in the tab strip).
+  ID_CAPTION_SPACER,
+  ID_MINIMIZE_BUTTON,
+  ID_MAXIMIZE_BUTTON,
+  ID_CLOSE_WINDOW_BUTTON,
   // Tab views use ID_TAB_FIRST + tab_id * 2 (+1 for the close button).
   ID_TAB_FIRST = 1000,
 };
@@ -90,6 +96,7 @@ constexpr cef_color_t kColorText = CefColorSetARGB(255, 232, 233, 240);
 constexpr cef_color_t kColorTextDim = CefColorSetARGB(255, 150, 152, 162);
 constexpr cef_color_t kColorAccent = CefColorSetARGB(255, 122, 92, 255);
 constexpr cef_color_t kColorButtonDisabled = CefColorSetARGB(255, 88, 90, 100);
+constexpr cef_color_t kColorCloseHover = CefColorSetARGB(255, 232, 76, 76);
 
 // Address-bar (textfield) colors. Readable light text on a lighter-than-window
 // input background — fixes the "black on black" bug. These are applied via
@@ -370,8 +377,29 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 
   window_->Show();
 
+  // Now that the views are laid out, mark the caption area draggable so the
+  // frameless window can be moved.
+  UpdateDraggableRegions();
+
   if (CefRefPtr<CefBrowserView> view = ActiveBrowserView()) {
     view->RequestFocus();
+  }
+}
+
+void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow> window,
+                                          const CefRect& new_bounds) {
+  CEF_REQUIRE_UI_THREAD();
+  // The caption spacer moves/resizes with the window; refresh the draggable
+  // region and the maximize-button glyph.
+  UpdateDraggableRegions();
+  if (maximize_button_ && window_) {
+    const bool maxed = window_->IsMaximized();
+    if (maxed != is_maximized_) {
+      is_maximized_ = maxed;
+      // Restore glyph (U+2750) vs maximize glyph (U+25A1).
+      maximize_button_->SetText(maxed ? "\xE2\x9D\x90" : "\xE2\x96\xA1");
+      maximize_button_->SetTooltipText(maxed ? "Restore" : "Maximize");
+    }
   }
 }
 
@@ -389,6 +417,10 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   star_button_ = nullptr;
   shield_button_ = nullptr;
   menu_button_ = nullptr;
+  caption_spacer_ = nullptr;
+  minimize_button_ = nullptr;
+  maximize_button_ = nullptr;
+  close_window_button_ = nullptr;
   tabs_.clear();
   g_browser_window = nullptr;
 }
@@ -576,6 +608,25 @@ void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
       return;
     case ID_MENU_BUTTON:
       CreateTab("opennyx://settings", /*select=*/true);
+      return;
+    case ID_MINIMIZE_BUTTON:
+      if (window_) {
+        window_->Minimize();
+      }
+      return;
+    case ID_MAXIMIZE_BUTTON:
+      if (window_) {
+        if (window_->IsMaximized()) {
+          window_->Restore();
+        } else {
+          window_->Maximize();
+        }
+      }
+      return;
+    case ID_CLOSE_WINDOW_BUTTON:
+      if (window_) {
+        window_->Close();
+      }
       return;
     default:
       break;
@@ -1009,6 +1060,46 @@ void BrowserWindow::BuildUI() {
   new_tab_button_->SetTooltipText("New tab (Ctrl+T)");
   tab_strip_->AddChildView(new_tab_button_);
 
+  // -- Flexible drag spacer + frameless window controls --
+  // A flexible, empty panel eats the remaining horizontal space so the window
+  // controls sit at the far right. It doubles as the draggable caption area
+  // (see the draggable regions set in OnWindowCreated).
+  caption_spacer_ = CefPanel::CreatePanel(nullptr);
+  caption_spacer_->SetID(ID_CAPTION_SPACER);
+  tab_strip_->AddChildView(caption_spacer_);
+  if (CefRefPtr<CefBoxLayout> strip_box =
+          tab_strip_->GetLayout()->AsBoxLayout()) {
+    strip_box->SetFlexForView(caption_spacer_, 1);
+  }
+
+  auto make_caption_button = [this](const char* label, int id,
+                                    const char* tooltip, cef_color_t hover) {
+    CefRefPtr<CefLabelButton> b = CefLabelButton::CreateLabelButton(this, label);
+    b->SetID(id);
+    b->SetFontList("Segoe UI, 13px");
+    b->SetInkDropEnabled(true);
+    b->SetFocusable(false);
+    b->SetMinimumSize(CefSize(40, 30));
+    b->SetMaximumSize(CefSize(40, 30));
+    b->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+    b->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorTextDim);
+    b->SetTextColor(CEF_BUTTON_STATE_HOVERED, hover);
+    b->SetTooltipText(tooltip);
+    return b;
+  };
+  // Minimize (U+2013 en dash), Maximize (U+25A1 white square), Close (U+2715).
+  minimize_button_ = make_caption_button("\xE2\x80\x93", ID_MINIMIZE_BUTTON,
+                                         "Minimize", kColorText);
+  maximize_button_ = make_caption_button("\xE2\x96\xA1", ID_MAXIMIZE_BUTTON,
+                                         "Maximize", kColorText);
+  // Close hover = red, like every OS.
+  close_window_button_ = make_caption_button("\xE2\x9C\x95",
+                                             ID_CLOSE_WINDOW_BUTTON, "Close",
+                                             kColorCloseHover);
+  tab_strip_->AddChildView(minimize_button_);
+  tab_strip_->AddChildView(maximize_button_);
+  tab_strip_->AddChildView(close_window_button_);
+
   // -- Toolbar --
   toolbar_ = CefPanel::CreatePanel(nullptr);
   toolbar_->SetID(ID_TOOLBAR);
@@ -1153,6 +1244,24 @@ void BrowserWindow::UpdateWindowTitle() {
     title = tabs_[active_tab_].title + " — OpenNyx";
   }
   window_->SetTitle(title);
+}
+
+void BrowserWindow::UpdateDraggableRegions() {
+  if (!window_ || !caption_spacer_) {
+    return;
+  }
+  // Only the empty caption spacer is draggable. Interactive controls (tabs,
+  // buttons, address bar) keep their own hit-testing because they are NOT
+  // included as draggable regions.
+  std::vector<CefDraggableRegion> regions;
+  const CefRect b = caption_spacer_->GetBoundsInScreen();
+  const CefRect win = window_->GetBoundsInScreen();
+  if (b.width > 0 && b.height > 0) {
+    // Convert screen coords to window-relative coords.
+    CefRect r(b.x - win.x, b.y - win.y, b.width, b.height);
+    regions.push_back(CefDraggableRegion(r, /*draggable=*/true));
+  }
+  window_->SetDraggableRegions(regions);
 }
 
 void BrowserWindow::ActivateWithNewTab() {
