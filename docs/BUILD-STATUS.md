@@ -1,6 +1,6 @@
 # Build Status
 
-_Last updated: 2026-07-19 (M3 + M4 + Alloy runtime-style fix)_
+_Last updated: 2026-07-19 (M3 + M4 + Alloy runtime-style fix + custom-scheme render-process fix)_
 
 ## Current state: M3 (everyday features) + M4 (privacy layer)
 
@@ -136,6 +136,25 @@ downloads` page polls `opennyx://api/downloads` for live progress bars.
   - `PopupWindowDelegate::GetWindowRuntimeStyle() -> CEF_RUNTIME_STYLE_ALLOY`
   Enum lives in `include/internal/cef_types_runtime.h`. The new-tab URL is our
   own `opennyx://newtab` (see `GetNewTabURL()`), never Google.
+- **Blank white `opennyx://newtab` — the custom scheme was invisible to the
+  render process.** After the Alloy fix the shell (tab strip/toolbar/address
+  bar) rendered correctly, but the web content area stayed blank white: the
+  start page never loaded, and no error page appeared (the navigation was
+  *dropped*, not errored). **Root cause:** `main_win.cc` called
+  `CefExecuteProcess(main_args, nullptr, nullptr)` with a **NULL `CefApp`** for
+  sub-processes. `CefApp::OnRegisterCustomSchemes` MUST run in *every* process
+  type. Because it never ran in the **render** process, that process did not
+  know `opennyx` was a `STANDARD|SECURE` scheme, so it treated
+  `opennyx://newtab` as an unknown/opaque origin and silently refused to commit
+  the document → blank content (the dark HTML from `pages.cc` was never even
+  requested — the scheme handler factory in the browser process was never
+  reached). **Fix:** construct the single `OpenNyxApp` *before*
+  `CefExecuteProcess` and pass it to **both** `CefExecuteProcess` and
+  `CefInitialize`, so scheme registration happens in the browser AND all
+  sub-processes. One-line-ish change in `main_win.cc`; the dark new-tab page
+  with the OpenNyx wordmark + Brave search box now renders. (General CEF rule:
+  a custom STANDARD/SECURE scheme is only fully functional if the SAME `CefApp`
+  that implements `OnRegisterCustomSchemes` is handed to `CefExecuteProcess`.)
 - Vendored `third_party/json/` is committed (the `.gitignore` now ignores only
   the downloaded CEF distribution, not vendored headers).
 
