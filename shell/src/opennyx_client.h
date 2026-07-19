@@ -8,6 +8,7 @@
 #include <list>
 
 #include "include/cef_client.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_resource_request_handler.h"
@@ -17,6 +18,7 @@
 // and toolbar UI; this client tracks browser lifetimes so the application can
 // exit cleanly when the last window closes.
 class OpenNyxClient : public CefClient,
+                      public CefContextMenuHandler,
                       public CefDisplayHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
@@ -31,6 +33,9 @@ class OpenNyxClient : public CefClient,
   static OpenNyxClient* GetInstance();
 
   // CefClient methods:
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
+    return this;
+  }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
@@ -43,6 +48,18 @@ class OpenNyxClient : public CefClient,
   void OnAddressChange(CefRefPtr<CefBrowser> browser,
                        CefRefPtr<CefFrame> frame,
                        const CefString& url) override;
+
+  // CefContextMenuHandler methods: add "Inspect element" (dev console) to the
+  // right-click menu, so DevTools are reachable without the keyboard shortcut.
+  void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                           CefRefPtr<CefFrame> frame,
+                           CefRefPtr<CefContextMenuParams> params,
+                           CefRefPtr<CefMenuModel> model) override;
+  bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
+                            CefRefPtr<CefFrame> frame,
+                            CefRefPtr<CefContextMenuParams> params,
+                            int command_id,
+                            EventFlags event_flags) override;
 
   // CefLifeSpanHandler methods:
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;

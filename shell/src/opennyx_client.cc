@@ -206,6 +206,42 @@ cef_return_value_t OpenNyxClient::OnBeforeResourceLoad(
   return RV_CONTINUE;
 }
 
+namespace {
+// User-defined context-menu command IDs must live between MENU_ID_USER_FIRST
+// (26500) and MENU_ID_USER_LAST.
+const int kMenuInspectElement = MENU_ID_USER_FIRST + 0;
+}  // namespace
+
+void OpenNyxClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                                        CefRefPtr<CefFrame> frame,
+                                        CefRefPtr<CefContextMenuParams> params,
+                                        CefRefPtr<CefMenuModel> model) {
+  CEF_REQUIRE_UI_THREAD();
+  // Append "Inspect element" so the dev console is reachable via right-click
+  // (in addition to the Ctrl+Shift+I shortcut). DevTools are fully local and
+  // Google-free -- part of the Chromium engine, no network calls.
+  if (model->GetCount() > 0) {
+    model->AddSeparator();
+  }
+  model->AddItem(kMenuInspectElement, "Inspect element");
+}
+
+bool OpenNyxClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
+                                         CefRefPtr<CefFrame> frame,
+                                         CefRefPtr<CefContextMenuParams> params,
+                                         int command_id,
+                                         EventFlags event_flags) {
+  CEF_REQUIRE_UI_THREAD();
+  if (command_id == kMenuInspectElement) {
+    // Open DevTools inspecting the element that was right-clicked.
+    CefPoint inspect_at(params->GetXCoord(), params->GetYCoord());
+    browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr,
+                                     CefBrowserSettings(), inspect_at);
+    return true;
+  }
+  return false;
+}
+
 void OpenNyxClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
 
