@@ -37,6 +37,14 @@ class OpenNyxBlocklist {
   bool ShouldBlock(const std::string& host,
                    const std::string& first_party_host);
 
+  // Always-on Google phone-home guard, independent of the tracker toggle and
+  // WITHOUT any first-party exception. This is the network-level backstop for
+  // runtime de-googling: even if a command-line switch fails to suppress a
+  // Google telemetry/variations/safe-browsing call, the request is cancelled
+  // here. Returns true for hosts that are pure Google phone-home endpoints
+  // (never user-facing services like google.com search or googlevideo).
+  bool ShouldBlockGooglePhoneHome(const std::string& host);
+
   // Total number of domains in the bundled list.
   size_t size() const { return domains_.size(); }
 

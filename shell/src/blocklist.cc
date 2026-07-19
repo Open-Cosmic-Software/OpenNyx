@@ -217,6 +217,79 @@ bool OpenNyxBlocklist::ShouldBlock(const std::string& host_in,
   return false;
 }
 
+bool OpenNyxBlocklist::ShouldBlockGooglePhoneHome(const std::string& host_in) {
+  if (host_in.empty()) {
+    return false;
+  }
+  const std::string host = ToLower(host_in);
+
+  // Exact phone-home hostnames Chromium reaches out to for telemetry,
+  // variations seeds, safe-browsing, component updates, optimization hints,
+  // domain reliability, gcm/push, and the connectivity probe. These are NOT
+  // user-facing services, so blocking them never breaks browsing. This list is
+  // the network backstop behind the command-line switches.
+  static const std::unordered_set<std::string> kGooglePhoneHome = {
+      // Variations / field trials
+      "clients4.google.com",
+      "clientservices.googleapis.com",
+      // Component / extension updates
+      "update.googleapis.com",
+      "clients2.google.com",
+      "clients2.googleusercontent.com",
+      // Metrics / UMA / crash
+      "clients1.google.com",
+      "clients3.google.com",
+      "clients5.google.com",
+      "clients6.google.com",
+      "stats.g.doubleclick.net",
+      // Safe Browsing
+      "safebrowsing.googleapis.com",
+      "safebrowsing.google.com",
+      "sb-ssl.google.com",
+      // Optimization hints / prefetch proxy
+      "optimizationguide-pa.googleapis.com",
+      // Domain reliability
+      "domain-reliability.googleapis.com",
+      // GCM / push (Chrome's background messaging)
+      "mtalk.google.com",
+      "gcm.googleapis.com",
+      // Connectivity / captive-portal probe
+      "connectivitycheck.gstatic.com",
+      // Translate backend (the API host, not the user-facing translate.google
+      // .com site)
+      "translate.googleapis.com",
+  };
+  if (kGooglePhoneHome.find(host) != kGooglePhoneHome.end()) {
+    return true;
+  }
+
+  // Suffix families that are pure telemetry/ads infrastructure.
+  static const char* kGoogleTelemetrySuffixes[] = {
+      "gvt2.com",   // update / experiment pings
+      "doubleclick.net",
+      "google-analytics.com",
+      "googletagmanager.com",
+      "googletagservices.com",
+      "googlesyndication.com",
+      "app-measurement.com",
+      "crashlytics.com",
+  };
+  std::string h = host;
+  while (!h.empty()) {
+    for (const char* suf : kGoogleTelemetrySuffixes) {
+      if (h == suf) {
+        return true;
+      }
+    }
+    const size_t dot = h.find('.');
+    if (dot == std::string::npos) {
+      break;
+    }
+    h = h.substr(dot + 1);
+  }
+  return false;
+}
+
 void OpenNyxBlocklist::RecordBlock(const std::string& first_party_host) {
   total_blocked_.fetch_add(1);
   if (first_party_host.empty()) {

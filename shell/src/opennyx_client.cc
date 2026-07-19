@@ -176,16 +176,22 @@ cef_return_value_t OpenNyxClient::OnBeforeResourceLoad(
     CefRefPtr<CefRequest> request,
     CefRefPtr<CefCallback> callback) {
   OpenNyxBlocklist* bl = OpenNyxBlocklist::Get();
-  if (!bl->enabled()) {
-    return RV_CONTINUE;
-  }
   const std::string url = request->GetURL().ToString();
   // Never block our own scheme.
   if (url.compare(0, 10, "opennyx://") == 0) {
     return RV_CONTINUE;
   }
-  // Extract host of the request and of the first-party document.
   const std::string req_host = HostOf(url);
+  // Always-on Google phone-home backstop: runs even when the tracker toggle is
+  // OFF. This is the network-level guarantee behind runtime de-googling.
+  if (!req_host.empty() && bl->ShouldBlockGooglePhoneHome(req_host)) {
+    bl->RecordBlock(HostOf(frame ? frame->GetURL().ToString() : std::string()));
+    return RV_CANCEL;
+  }
+  if (!bl->enabled()) {
+    return RV_CONTINUE;
+  }
+  // Extract host of the first-party document.
   std::string fp_host;
   if (frame) {
     fp_host = HostOf(frame->GetURL().ToString());
