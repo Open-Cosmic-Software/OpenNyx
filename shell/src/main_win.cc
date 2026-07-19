@@ -9,6 +9,10 @@
 
 #include "include/cef_command_line.h"
 
+#include <shlobj.h>
+
+#include <string>
+
 #include "opennyx_app.h"
 
 namespace {
@@ -43,6 +47,40 @@ int RunMain(HINSTANCE hInstance, int nCmdShow) {
   // M1 runs without the Windows sandbox (a plain .exe, no bootstrap.exe /
   // DLL split). Enabling the sandbox is tracked for M2.
   settings.no_sandbox = true;
+
+  // Persist a single, stable user-data / cache directory. This is REQUIRED for
+  // single-instance behaviour: without a root_cache_path CEF gives each launch
+  // its own temporary profile, and a SECOND launch (while the first is still
+  // running) cannot take the Chrome runtime's process singleton -- it falls
+  // back to spawning a bare Chrome window instead of OpenNyx's own UI. With a
+  // fixed root_cache_path, a second launch instead triggers OnAlreadyRunning()
+  // in the FIRST process (which raises our existing window / opens a new tab)
+  // and the second process exits cleanly.
+  // Compute the cache dir with the native API (CefGetPath is not available
+  // until after CefInitialize). Prefer %LOCALAPPDATA%\OpenNyx; fall back to
+  // the executable directory.
+  std::string data_dir;
+  {
+    wchar_t* local_appdata = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr,
+                                       &local_appdata)) &&
+        local_appdata) {
+      const std::wstring w = std::wstring(local_appdata) + L"\\OpenNyx";
+      CoTaskMemFree(local_appdata);
+      const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0,
+                                        nullptr, nullptr);
+      if (n > 0) {
+        std::string utf8(static_cast<size_t>(n - 1), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, utf8.data(), n, nullptr,
+                            nullptr);
+        data_dir = utf8;
+      }
+    }
+  }
+  if (!data_dir.empty()) {
+    CreateDirectoryA(data_dir.c_str(), nullptr);
+    CefString(&settings.root_cache_path).FromString(data_dir);
+  }
 
   // Initialize the CEF browser process.
   if (!CefInitialize(main_args, settings, app.get(), nullptr)) {

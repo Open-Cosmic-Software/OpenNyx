@@ -121,6 +121,18 @@ void OpenNyxApp::OnContextInitialized() {
   BrowserWindow::Create(url);
 }
 
+bool OpenNyxApp::OnAlreadyRunning(int new_instance_id) {
+  CEF_REQUIRE_UI_THREAD();
+  // A second OpenNyx.exe was launched; this callback runs in the ORIGINAL
+  // process. Surface our existing window (and give it a fresh tab) instead of
+  // letting a second, profile-less process spawn a bare Chrome window.
+  if (BrowserWindow* window = BrowserWindow::Get()) {
+    window->ActivateWithNewTab();
+  }
+  // Returning true tells CEF we handled it; the second process exits.
+  return true;
+}
+
 CefRefPtr<CefClient> OpenNyxApp::GetDefaultClient() {
   // Called when a new browser window is created via the Chrome runtime style
   // UI (e.g. Ctrl+N, middle-click link -> new window).

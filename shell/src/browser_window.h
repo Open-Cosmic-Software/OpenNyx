@@ -65,6 +65,10 @@ class BrowserWindow : public CefWindowDelegate,
   // Number of open tabs.
   size_t tab_count() const { return tabs_.size(); }
 
+  // Brings the window to the front and opens a fresh new-tab page. Called when
+  // a second app instance is launched (see OpenNyxApp::OnAlreadyRunning).
+  void ActivateWithNewTab();
+
   // ---- Tab management ----
   void CreateTab(const std::string& url, bool select);
   void CloseActiveTab();

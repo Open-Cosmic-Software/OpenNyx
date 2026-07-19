@@ -107,7 +107,7 @@ if(OS_WINDOWS)
   SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
   add_dependencies(${CEF_TARGET} libcef_dll_wrapper)
   target_link_libraries(${CEF_TARGET} libcef_lib libcef_dll_wrapper
-                        ${CEF_STANDARD_LIBS})
+                        ${CEF_STANDARD_LIBS} Shell32 Ole32)
 
   target_include_directories(${CEF_TARGET} PRIVATE
                              "${CMAKE_CURRENT_SOURCE_DIR}/src"

@@ -1124,6 +1124,15 @@ void BrowserWindow::UpdateWindowTitle() {
   window_->SetTitle(title);
 }
 
+void BrowserWindow::ActivateWithNewTab() {
+  CEF_REQUIRE_UI_THREAD();
+  if (window_) {
+    window_->Show();
+    window_->BringToTop();
+  }
+  CreateTab(GetNewTabURL(), /*select=*/true);
+}
+
 void BrowserWindow::FocusAddressBar() {
   if (address_bar_) {
     address_bar_->RequestFocus();

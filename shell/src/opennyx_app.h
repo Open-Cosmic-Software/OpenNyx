@@ -34,6 +34,10 @@ class OpenNyxApp : public CefApp, public CefBrowserProcessHandler {
   // CefBrowserProcessHandler methods:
   void OnContextInitialized() override;
   CefRefPtr<CefClient> GetDefaultClient() override;
+  // Called in the ORIGINAL process when a second instance is launched (the
+  // second process then exits). We bring the existing window to the front and
+  // open a new tab, matching how mainstream browsers treat a re-launch.
+  bool OnAlreadyRunning(int new_instance_id) override;
 
  private:
   IMPLEMENT_REFCOUNTING(OpenNyxApp);
