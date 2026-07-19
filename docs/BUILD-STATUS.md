@@ -1,140 +1,138 @@
 # Build Status
 
-_Last updated: 2026-07-19 (M2.1)_
+_Last updated: 2026-07-19 (M3 + M4)_
 
-## M2.1 — polish & the address-bar readability fix
+## Current state: M3 (everyday features) + M4 (privacy layer)
 
-Tester feedback on M2 flagged one blocker and a general "make it prettier"
-ask. Both are addressed here.
-
-### Address bar: black-on-black text (BLOCKER) — fixed
-
-**Symptom:** the address bar rendered dark text on a dark background, so
-typed URLs were unreadable.
-
-**Root cause / earlier mistake:** an earlier commit assumed the per-Textfield
-color setters were *removed* in CEF API 15000 and dropped them, leaving the
-field with no explicit colors (hence unreadable defaults). That was wrong.
-Inspecting the pinned CEF 150 header
-(`include/views/cef_textfield.h`) shows `SetTextColor` /
-`SetSelectionBackgroundColor` / `SetPlaceholderTextColor` are still present
-but wrapped in `#if CEF_API_REMOVED(15000)` — i.e. they are only compiled in
-when `CEF_API_VERSION < 15000`. This project builds at the default
-(experimental) API version, where those methods are **compiled out**, so
-calling them would not even link.
-
-**Correct fix (the supported CEF 150 path):** color the textfield through the
-**window theme** instead of the individual view. `BrowserWindow::ApplyTheme()`
-calls `CefWindow::SetThemeColor(color_id, color)` with the standard
-`CEF_ColorTextfield*` IDs and then `CefWindow::ThemeChanged()` to push the
-colors into the view hierarchy (`cef_color_ids.h`):
-
-| Color ID | Value | Purpose |
-|---|---|---|
-| `CEF_ColorTextfieldBackground` | `#2a2a2e` | input background (lighter than window) |
-| `CEF_ColorTextfieldForeground` | `#f0f0f0` | typed text (now readable) |
-| `CEF_ColorTextfieldForegroundPlaceholder` | `#94969a` | placeholder text |
-| `CEF_ColorTextfieldSelectionBackground` | `#7a5cff` | selection highlight |
-| `CEF_ColorTextfieldSelectionForeground` | `#ffffff` | selected text |
-| `CEF_ColorTextfieldOutline` / `…FilledUnderline` | `#3c3e4a` | field border |
-| `CEF_ColorTextfieldFilledUnderlineFocused` | `#7a5cff` | focus highlight |
-
-Re-applied automatically on OS/Chrome theme changes via
-`CefWindowDelegate::OnThemeColorsChanged`. Verified by compiling
-`browser_window.cc` against the pinned CEF 150 headers (`-fsyntax-only`,
-clean).
-
-### Visual polish
-
-- **Cohesive dark theme:** refined toolbar (`#22232b`) and a distinct,
-  darker tab-strip band (`#16171c`); purple accent `#7a5cff` matching the
-  wordmark; roomier paddings/spacing throughout.
-- **Toolbar buttons:** larger hit targets, centered glyphs, explicit
-  per-state text colors including a **greyed disabled** state (back/forward
-  dim automatically when there's no history). Added a **Home** (⌂) button
-  that loads the new-tab page.
-- **Tab strip:** clearer active-vs-inactive contrast, hover brightening on
-  tab titles and the per-tab close (×) button, taller comfortable tabs (32px),
-  a brighter-on-hover new-tab (+) button.
-- **Address bar:** readable (see above), placeholder "Search with Brave or
-  enter address", theme-driven focus outline, accessible name set.
-- **New-tab page:** elegant radial-gradient dark background, larger centered
-  Open**Nyx** wordmark, focus-glow search box, and five minimal quick-link
-  tiles (Brave, Wikipedia, GitHub, HN, Maps). Clean and uncluttered.
-
-Privacy defaults (Brave Search, no Google keys, metrics disabled) and all
-keyboard shortcuts are unchanged.
-
----
-
-## Current state: M2 — polished first real browser UI
+CI is **green**; the `OpenNyx-win64` artifact builds and links with all of the
+M3/M4 features below. See the Actions tab for the latest run.
 
 | Item | Status |
 |---|---|
-| Windows x64 CI build (`OpenNyx-win64` artifact) | see badge / latest run on the Actions tab |
-| Custom Views UI (tab strip, toolbar, address bar) | ✅ implemented |
-| Brave Search as default search | ✅ |
-| Built-in dark new-tab page | ✅ |
-| Keyboard shortcuts | ✅ (see below) |
-| App icon + version resource | ✅ |
-| Privacy defaults (no Google keys, metrics disabled) | ✅ unchanged from M1 |
+| Windows x64 CI build (`OpenNyx-win64` artifact) | ✅ green |
+| Custom Views UI (tab strip, toolbar, address bar) | ✅ |
+| `opennyx://` privileged scheme (pages + JSON bridge) | ✅ |
+| **History** (record + `opennyx://history` list/search/clear) | ✅ |
+| **Bookmarks** (star button + `opennyx://bookmarks`) | ✅ |
+| **Downloads** (DownloadHandler + `opennyx://downloads`) | ✅ |
+| **Settings** (`opennyx://settings`, persisted config) | ✅ |
+| **Tracker/ad blocking** (bundled blocklist + shield count) | ✅ |
+| **DNS-over-HTTPS** (secure mode, resolver choice) | ✅ |
+| **Network audit** doc (`docs/NETWORK-AUDIT.md`) | ✅ |
+| Address-bar history autocomplete | ⏳ deferred (helper exists, not wired to the Views textfield) |
+| Bookmarks bar under toolbar | ⏳ deferred (nice-to-have) |
 | Windows sandbox (bootstrap.exe split) | ⏳ deferred |
 
-## What happened to the M1 toolbar?
+## Architecture of the M3/M4 additions
 
-M1 relied on the Chrome runtime style's built-in toolbar
-(`GetChromeToolbarType() == CEF_CTT_NORMAL`). On the tester's machine only
-the webview rendered — the Chrome toolbar/tab strip never appeared. The
-Chrome toolbar requires Chrome UI resources that are not reliably available
-in the plain CEF Standard distribution setup we ship, and when it fails it
-fails silently (no toolbar, no error).
+### The `opennyx://` scheme (`scheme_handler.*`, `pages.*`)
 
-**M2 fix:** OpenNyx now draws its **own** UI with the CEF Views framework
-(`shell/src/browser_window.*`): a tab strip and toolbar built from
-`CefPanel` / `CefLabelButton` / `CefTextfield` views, with one
-`CefBrowserView` per tab. Nothing depends on optional Chrome resources, so
-the UI cannot silently disappear.
+Rich UI pages are served by a **privileged custom scheme** rather than native
+Views. `OnRegisterCustomSchemes` declares `opennyx` as
+STANDARD+SECURE+CORS+FETCH; a `CefSchemeHandlerFactory` returns an in-memory
+`CefResourceHandler` for each request:
 
-## UI overview (M2)
+- `opennyx://newtab|history|bookmarks|downloads|settings` → embedded HTML
+  (dark-themed, self-contained; see `pages.cc`).
+- `opennyx://api/<endpoint>` → the **browser⇄page bridge** as a small JSON API
+  (GET for reads, POST for mutations). Pages just `fetch()` these. This avoids
+  a separate render-process `CefMessageRouter` round-trip entirely.
+
+API endpoints: `config` (GET/POST), `resolve` (address-bar resolution),
+`history`, `history/clear`, `bookmarks`, `bookmarks/remove`, `downloads`,
+`downloads/clear`, `cleardata`, `blockstats`.
+
+### Storage (`store.cc`) — JSON, not SQLite
+
+CEF ships no SQLite helper. Rather than pull the SQLite amalgamation into the
+build (a large C TU + its own quirks under CEF's `/GR- /EHsc- /WX` flags), we
+use small **JSON documents** via the header-only nlohmann/json library
+(vendored under `third_party/json`, built with `JSON_NOEXCEPTION` because CEF
+disables exceptions). Files live in an `OpenNyx/` folder in the CEF user-data
+dir: `config.json`, `history.json` (capped 5000), `bookmarks.json`,
+`downloads.json` (capped 500). Writes are atomic (temp + rename). `OpenNyxStore`
+is a thread-safe singleton (touched from the UI thread for navigation events
+and the IO thread for the scheme API). The backend is isolated behind this
+class, so swapping in SQLite later is a localized change.
+
+### Tracker/ad blocking (`blocklist.*`, `opennyx_client.cc`)
+
+`OpenNyxClient` implements `CefRequestHandler::GetResourceRequestHandler` →
+`CefResourceRequestHandler::OnBeforeResourceLoad`, returning `RV_CANCEL` for any
+request whose host matches the bundled blocklist (domain-suffix match, with a
+first-party exception so a site's own domain is never blocked).
+
+- **Blocklist source:** a curated, compact subset (~250 high-signal domains) of
+  the public ad/tracking corpora — Peter Lowe's list (pgl.yoyo.org, CC-BY),
+  StevenBlack/hosts (MIT), and EasyList/EasyPrivacy well-known domains. Embedded
+  as a C array (`kBundledDomains`) and loaded into a hash set once; kept small
+  deliberately to keep the binary lean.
+- **Per-site counter + shield:** each block increments a per-first-party-host
+  counter; the toolbar **🛡 shield** shows the number for the active tab and
+  turns accent-colored when > 0. Toggle-able in Settings (mirrored into the
+  runtime `OpenNyxBlocklist` flag).
+
+### DNS-over-HTTPS (`opennyx_app.cc`)
+
+`OnBeforeCommandLineProcessing` appends, when enabled (default on):
 
 ```
-┌──────────────────────────────────────────────┐
-│ [Tab 1 ×][Tab 2 ×] [+]                       │  tab strip
-├──────────────────────────────────────────────┤
-│ ← → ⟳ ⌂ [ address / Brave Search …         ] │  toolbar
-├──────────────────────────────────────────────┤
-│                                              │
-│              active CefBrowserView           │  content
-│                                              │
-└──────────────────────────────────────────────┘
+--dns-over-https-mode=secure
+--dns-over-https-templates=<resolver>
 ```
 
-- Dark-first theme (window `#18191e`, toolbar `#22232b`, tab strip `#16171c`,
-  accent `#7a5cff`).
-- Address-bar (textfield) colors come from window theme overrides
-  (`CefWindow::SetThemeColor` + `CEF_ColorTextfield*`), not per-view setters,
-  which are compiled out at this CEF API version.
-- Default window 1280×800, minimum 480×320.
-- Window title follows the active tab's page title (`<title> — OpenNyx`).
-- Address bar: input that looks like a URL navigates (scheme added if
-  missing); anything else searches `https://search.brave.com/search?q=…`.
-- New-tab page: built-in dark page (data: URL) with the OpenNyx wordmark and
-  a centered Brave Search box.
-- Popups / `window.open` / DevTools open in their own top-level window.
+Resolver is user-selectable in Settings: **Cloudflare** (`cloudflare-dns.com`,
+default), **Quad9** (`dns.quad9.net`, CH), **Mullvad** (`dns.mullvad.net`, SE),
+or a **custom** RFC 8484 template. "secure" mode means DoH-only (no plaintext
+fallback). Applied at process start from persisted config; changes take effect
+on restart (documented in the UI).
+
+### Downloads (`opennyx_client.cc`)
+
+`CefDownloadHandler::OnBeforeDownload` shows the OS save dialog and records the
+item; `OnDownloadUpdated` upserts progress into the store. The `opennyx://
+downloads` page polls `opennyx://api/downloads` for live progress bars.
 
 ## Keyboard shortcuts
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+T` | New tab |
-| `Ctrl+W` | Close tab (closing the last tab closes the window) |
+| `Ctrl+W` | Close tab (last tab closes the window) |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
-| `Ctrl+L` | Focus address bar (select all) |
+| `Ctrl+L` | Focus address bar |
 | `F5` / `Ctrl+R` | Reload |
-| `Ctrl+Shift+R` | Hard reload (ignore cache) |
+| `Ctrl+Shift+R` | Hard reload |
 | `Alt+Left` / `Alt+Right` | History back / forward |
-| `Ctrl+Shift+I` | DevTools (separate window) |
+| `Ctrl+Shift+I` | DevTools |
+| **`Ctrl+H`** | **History page** |
+| **`Ctrl+D`** | **Bookmark current page (toggle)** |
+| **`Ctrl+J`** | **Downloads page** |
+| **`Ctrl+,`** | **Settings page** |
 | `Esc` (address bar) | Restore current URL, focus page |
+
+## Build notes / gotchas encountered
+
+- **CEF compiles with `_HAS_EXCEPTIONS=0 /GR- /W4 /WX`.** Third-party code must
+  build under the same regime. Fix: `JSON_NOEXCEPTION` for nlohmann/json and
+  **no `try/catch`** in our code (`json::parse(..., allow_exceptions=false)` +
+  `is_object()/is_array()` checks instead). `/bigobj` added for the large json
+  header.
+- **`VK_OEM_COMMA` is a Windows macro** — our local constant was renamed to
+  `kVK_OEM_COMMA` to avoid the clash (`error C2059`).
+- Vendored `third_party/json/` is committed (the `.gitignore` now ignores only
+  the downloaded CEF distribution, not vendored headers).
+
+## Deferred (M5+)
+
+- Address-bar autocomplete surfaced in the Views textfield (the
+  `OpenNyxStore::AutocompleteHistory` helper exists but isn't wired to a
+  dropdown yet).
+- Bookmarks bar under the toolbar.
+- Dev tools suite (JSON viewer, request inspector, API client), command palette
+  (Ctrl+K) — see README roadmap.
+- Windows sandbox (bootstrap.exe/DLL split).
+- Favicons in the tab strip; tab drag-reorder; loading spinner.
 
 ## CI
 
@@ -142,14 +140,3 @@ the UI cannot silently disappear.
   Ninja + MSVC (`ilammy/msvc-dev-cmd`), CEF binary distro cached.
 - Artifact: **OpenNyx-win64** (unzip → run `opennyx.exe`).
 - CEF pin: `150.0.11+gb887805+chromium-150.0.7871.115` (Chromium 150).
-
-## Deferred (M3+)
-
-- Windows sandbox (requires the bootstrap.exe/DLL split).
-- Rounded textfield corners (CEF Views textfields are square-cornered; would
-  need an owner-drawn wrapper panel).
-- Favicons in the tab strip (CefImage from `OnFaviconURLChange` download).
-- Loading spinner / progress indication beyond the reload/stop glyph swap.
-- Tab drag-reorder, middle-click close, tab overflow scrolling.
-- `opennyx://` privileged pages (settings, privacy dashboard).
-- Command palette (Ctrl+K), themes, blocker — see roadmap in README.
