@@ -385,9 +385,10 @@ std::string SettingsPage() {
   <div class="field"><div class="lbl">DoH resolver
     <small>Non-US options first. Applied on restart.</small></div>
     <select id="resolver">
-      <option value="cloudflare">Cloudflare (1.1.1.1)</option>
       <option value="quad9">Quad9 (Switzerland)</option>
+      <option value="dns0">DNS0.eu (Europe)</option>
       <option value="mullvad">Mullvad (Sweden)</option>
+      <option value="cloudflare">Cloudflare (US, opt-in)</option>
       <option value="custom">Custom template…</option>
     </select></div>
   <div class="field" id="dohCustomRow" style="display:none">
@@ -425,7 +426,7 @@ function fill(){
   document.getElementById('homepage').value=cfg.homepage||'opennyx://newtab';
   document.getElementById('blocking').checked=!!cfg.blocking_enabled;
   document.getElementById('doh').checked=!!cfg.doh_enabled;
-  document.getElementById('resolver').value=cfg.doh_resolver||'cloudflare';
+  document.getElementById('resolver').value=cfg.doh_resolver||'quad9';
   document.getElementById('dohCustom').value=cfg.doh_custom_template||'';
   toggleCustom();
 }

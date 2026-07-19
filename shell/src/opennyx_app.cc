@@ -21,21 +21,25 @@
 
 namespace {
 
-// Maps a resolver id to its RFC 8484 DoH URI template. Non-US resolvers are
-// offered first (Quad9 = Switzerland, Mullvad = Sweden); Cloudflare is the
-// default because it is fast and widely reachable.
+// Maps a resolver id to its RFC 8484 DoH URI template. OpenNyx defaults to
+// Quad9 (Swiss non-profit foundation, no-log, blocks malware). Big-Tech / US
+// resolvers are NOT the default; Cloudflare is only available as an explicit
+// opt-in choice.
 std::string DohTemplateFor(const AppConfig& cfg) {
-  if (cfg.doh_resolver == "quad9") {
-    return "https://dns.quad9.net/dns-query";
-  }
   if (cfg.doh_resolver == "mullvad") {
     return "https://dns.mullvad.net/dns-query";
+  }
+  if (cfg.doh_resolver == "dns0") {
+    return "https://zero.dns0.eu/";
+  }
+  if (cfg.doh_resolver == "cloudflare") {
+    return "https://cloudflare-dns.com/dns-query";
   }
   if (cfg.doh_resolver == "custom" && !cfg.doh_custom_template.empty()) {
     return cfg.doh_custom_template;
   }
-  // Default: Cloudflare.
-  return "https://cloudflare-dns.com/dns-query";
+  // Default: Quad9 (Switzerland, non-profit, no-log, malware-blocking).
+  return "https://dns.quad9.net/dns-query";
 }
 
 }  // namespace
