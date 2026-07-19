@@ -4,14 +4,30 @@
 
 #include "browser_window.h"
 
+#if defined(_WIN32)
+// Only for GetCursorPos()/GetKeyState() in the tab drag-reorder poll. The CEF
+// Views API (CEF 150) has no mouse-move/drag delegate callbacks, so a true
+// pointer drag needs the OS cursor. NOMINMAX/WIN32_LEAN_AND_MEAN keep the
+// macro fallout minimal.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include "include/cef_color_ids.h"
 #include "include/cef_cookie.h"
+#include "include/views/cef_display.h"
 #include "include/cef_image.h"
 #include "app_icon_png.h"
 #include "include/cef_parser.h"
@@ -73,6 +89,8 @@ enum CommandID {
   CMD_BOOKMARK,
   CMD_DOWNLOADS,
   CMD_SETTINGS,
+  CMD_MOVE_TAB_LEFT,
+  CMD_MOVE_TAB_RIGHT,
 };
 
 // ---- Windows virtual key codes (avoid pulling in windows.h here) ----
@@ -82,7 +100,16 @@ constexpr int kVK_TAB = 0x09;
 constexpr int kVK_F5 = 0x74;
 constexpr int kVK_LEFT = 0x25;
 constexpr int kVK_RIGHT = 0x27;
+constexpr int kVK_PRIOR = 0x21;  // Page Up.
+constexpr int kVK_NEXT = 0x22;   // Page Down.
 constexpr int kVK_OEM_COMMA = 0xBC;  // ',' key.
+
+// Drag-to-reorder tuning.
+// Horizontal cursor travel (DIP) before a press turns into a drag. Keeps
+// plain clicks from jiggling the strip.
+constexpr int kDragStartThresholdDip = 8;
+// Cursor poll interval while a tab is pressed (~60 fps).
+constexpr int kDragPollIntervalMs = 16;
 
 // ---- Dark theme palette ----
 // A cohesive, slightly blue-tinted charcoal theme with a purple accent that
@@ -517,6 +544,16 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window, int command_id) {
     case CMD_SETTINGS:
       CreateTab("opennyx://settings", /*select=*/true);
       return true;
+    case CMD_MOVE_TAB_LEFT:
+      if (active_tab_ > 0) {
+        MoveTab(active_tab_, active_tab_ - 1);
+      }
+      return true;
+    case CMD_MOVE_TAB_RIGHT:
+      if (active_tab_ + 1 < tabs_.size()) {
+        MoveTab(active_tab_, active_tab_ + 1);
+      }
+      return true;
     default:
       return false;
   }
@@ -646,6 +683,161 @@ void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
         return;
       }
     }
+  }
+}
+
+void BrowserWindow::OnButtonStateChanged(CefRefPtr<CefButton> button) {
+  CEF_REQUIRE_UI_THREAD();
+  // Drag-to-reorder entry point. The CEF 150 Views API has no mouse-move /
+  // drag delegate callbacks, so we detect the press here (a tab title button
+  // entering the PRESSED state = mouse-down on the tab) and then track the OS
+  // cursor with a short repeating UI-thread poll (DragPoll) until the mouse
+  // button is released. While the press is held and the cursor travels
+  // horizontally past a small threshold, the tab is live-reordered to follow
+  // the cursor -- the same feel as Chrome's tab drag, minus the floating
+  // pixel-perfect drag image.
+  const int id = button->GetID();
+  if (id < ID_TAB_FIRST || ((id - ID_TAB_FIRST) % 2) != 0) {
+    return;  // Not a tab title button.
+  }
+  if (button->GetState() != CEF_BUTTON_STATE_PRESSED) {
+    return;  // Only mouse-down starts a potential drag; release is handled
+             // by the poll noticing the button is up.
+  }
+  const int tab_id = (id - ID_TAB_FIRST) / 2;
+  if (drag_tab_id_ == tab_id) {
+    return;  // Already tracking this press.
+  }
+#if defined(_WIN32)
+  POINT pt;
+  if (!GetCursorPos(&pt)) {
+    return;
+  }
+  const CefPoint dip = CefDisplay::ConvertScreenPointFromPixels(
+      CefPoint(pt.x, pt.y));
+  drag_tab_id_ = tab_id;
+  drag_started_ = false;
+  drag_press_x_ = dip.x;
+  const int seq = ++drag_seq_;
+  CefPostDelayedTask(TID_UI,
+                     base::BindOnce(&BrowserWindow::DragPoll, this, seq),
+                     kDragPollIntervalMs);
+#endif
+}
+
+void BrowserWindow::DragPoll(int seq) {
+  CEF_REQUIRE_UI_THREAD();
+#if defined(_WIN32)
+  if (seq != drag_seq_ || drag_tab_id_ < 0 || !window_) {
+    return;  // Stale poll from a previous press.
+  }
+
+  // Logical primary mouse button released -> the press (click or drag) is
+  // over. GetKeyState reflects the swapped-buttons setting, matching the
+  // button press that started this poll.
+  if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0) {
+    EndTabDrag();
+    return;
+  }
+
+  // Resolve the dragged tab's CURRENT index (it moves as we reorder, and
+  // other tabs can disappear underneath us, e.g. via JS window.close()).
+  size_t from = tabs_.size();
+  for (size_t i = 0; i < tabs_.size(); ++i) {
+    if (tabs_[i].id == drag_tab_id_) {
+      from = i;
+      break;
+    }
+  }
+  if (from >= tabs_.size()) {
+    EndTabDrag();  // Tab vanished mid-press.
+    return;
+  }
+
+  POINT pt;
+  if (GetCursorPos(&pt)) {
+    const CefPoint dip = CefDisplay::ConvertScreenPointFromPixels(
+        CefPoint(pt.x, pt.y));
+
+    if (!drag_started_ &&
+        std::abs(dip.x - drag_press_x_) >= kDragStartThresholdDip) {
+      drag_started_ = true;
+      // Like mainstream browsers, the dragged tab becomes the active tab.
+      if (from != active_tab_) {
+        SelectTab(from);
+      }
+    }
+
+    if (drag_started_) {
+      // Find where the cursor is: the tab whose horizontal midpoint the
+      // cursor has crossed becomes the drop position. Bounds are in DIP
+      // screen coordinates, same space as the converted cursor position.
+      size_t target = from;
+      for (size_t i = 0; i < tabs_.size(); ++i) {
+        if (i == from || !tabs_[i].tab_panel) {
+          continue;
+        }
+        const CefRect b = tabs_[i].tab_panel->GetBoundsInScreen();
+        if (b.width <= 0) {
+          continue;
+        }
+        const int mid = b.x + b.width / 2;
+        if (i < from && dip.x < mid) {
+          target = i;
+          break;  // Leftmost crossed midpoint wins when moving left.
+        }
+        if (i > from && dip.x > mid) {
+          target = i;  // Keep scanning: rightmost crossed midpoint wins.
+        }
+      }
+      if (target != from) {
+        MoveTab(from, target);
+      }
+    }
+  }
+
+  CefPostDelayedTask(TID_UI,
+                     base::BindOnce(&BrowserWindow::DragPoll, this, seq),
+                     kDragPollIntervalMs);
+#endif
+}
+
+void BrowserWindow::EndTabDrag() {
+  drag_tab_id_ = -1;
+  drag_started_ = false;
+  ++drag_seq_;  // Invalidate any queued DragPoll tasks.
+}
+
+void BrowserWindow::MoveTab(size_t from, size_t to) {
+  CEF_REQUIRE_UI_THREAD();
+  if (from >= tabs_.size() || to >= tabs_.size() || from == to) {
+    return;
+  }
+
+  // Keep the tab vector and the strip's child order in lock-step. Tab-vector
+  // index k corresponds to strip child index k (tabs occupy the first
+  // GetChildViewCount() slots before the + button / spacer / window
+  // controls), and both ReorderChildView and erase+insert place the moved
+  // element at final index |to|.
+  Tab tab = tabs_[from];
+  tabs_.erase(tabs_.begin() + from);
+  tabs_.insert(tabs_.begin() + to, tab);
+  if (tab_strip_ && tab.tab_panel) {
+    tab_strip_->ReorderChildView(tab.tab_panel, static_cast<int>(to));
+    tab_strip_->InvalidateLayout();
+  }
+
+  // Track the active tab across the move.
+  if (active_tab_ == from) {
+    active_tab_ = to;
+  } else if (from < active_tab_ && to >= active_tab_) {
+    --active_tab_;
+  } else if (from > active_tab_ && to <= active_tab_) {
+    ++active_tab_;
+  }
+
+  if (window_) {
+    window_->InvalidateLayout();
   }
 }
 
@@ -1203,6 +1395,11 @@ void BrowserWindow::AddAccelerators() {
   window_->SetAccelerator(CMD_BOOKMARK, 'D', false, true, false, true);
   window_->SetAccelerator(CMD_DOWNLOADS, 'J', false, true, false, true);
   window_->SetAccelerator(CMD_SETTINGS, kVK_OEM_COMMA, false, true, false, true);
+  // Move the active tab left/right (keyboard companion to drag-reorder).
+  window_->SetAccelerator(CMD_MOVE_TAB_LEFT, kVK_PRIOR, true, true, false,
+                          true);
+  window_->SetAccelerator(CMD_MOVE_TAB_RIGHT, kVK_NEXT, true, true, false,
+                          true);
 }
 
 CefRefPtr<CefBrowserView> BrowserWindow::ActiveBrowserView() {

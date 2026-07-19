@@ -127,6 +127,9 @@ class BrowserWindow : public CefWindowDelegate,
 
   // ---- CefButtonDelegate ----
   void OnButtonPressed(CefRefPtr<CefButton> button) override;
+  // Drag-to-reorder: a tab title button entering the PRESSED state starts a
+  // potential drag (see DragPoll below).
+  void OnButtonStateChanged(CefRefPtr<CefButton> button) override;
 
  private:
   BrowserWindow() = default;
@@ -159,6 +162,15 @@ class BrowserWindow : public CefWindowDelegate,
   // when the last tab's browser has finished closing.
   void MaybeCloseWindow();
   void UpdateTabStrip();
+  // Moves the tab at |from| to |to| (both tab-vector indices), keeping the
+  // strip child order and active_tab_ in sync. Used by drag-reorder and the
+  // Ctrl+Shift+PgUp/PgDn accelerators.
+  void MoveTab(size_t from, size_t to);
+  // Repeating UI-thread poll that implements pointer drag-to-reorder: while
+  // the mouse button is held on a tab it tracks the cursor and reorders the
+  // tab under it. |seq| invalidates stale polls after a drag ends.
+  void DragPoll(int seq);
+  void EndTabDrag();
   void UpdateWindowTitle();
   // Sets the address bar text with a reliable repaint. Clearing an unfocused
   // CefTextfield to empty via SetText("") does not always repaint (the old
@@ -198,6 +210,11 @@ class BrowserWindow : public CefWindowDelegate,
   std::vector<Tab> tabs_;
   size_t active_tab_ = 0;
   int next_tab_id_ = 1;
+  // ---- Drag-to-reorder state ----
+  int drag_tab_id_ = -1;    // id of the tab being pressed/dragged, -1 = none.
+  int drag_seq_ = 0;        // invalidates queued DragPoll tasks.
+  bool drag_started_ = false;  // true once the cursor passed the threshold.
+  int drag_press_x_ = 0;    // cursor x (DIP screen) at press time.
   // Set once we have issued the real window_->Close() so it is never issued
   // twice (guards re-entrant / double window teardown).
   bool window_close_issued_ = false;
