@@ -171,6 +171,16 @@ class PopupWindowDelegate : public CefWindowDelegate {
   IMPLEMENT_REFCOUNTING(PopupWindowDelegate);
 };
 
+// Decodes the embedded OpenNyx PNG into a CefImage once and caches it.
+CefRefPtr<CefImage> GetAppIconImage() {
+  static CefRefPtr<CefImage> image;
+  if (!image) {
+    image = CefImage::CreateImage();
+    image->AddPNG(1.0f, kOpenNyxIconPng, kOpenNyxIconPngSize);
+  }
+  return image;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -316,6 +326,14 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
   window_->SetTitle("OpenNyx");
   window_->SetBackgroundColor(kColorWindowBg);
 
+  // Set the title-bar + taskbar icon. CEF Views ignores the .rc icon here and
+  // wants a CefImage set explicitly on the window (there is no GetWindowIcon
+  // delegate method on CefWindowDelegate).
+  if (CefRefPtr<CefImage> icon = GetAppIconImage()) {
+    window_->SetWindowIcon(icon);
+    window_->SetWindowAppIcon(icon);
+  }
+
   // Override theme colors (address-bar text/background etc.) before building
   // the UI so children pick them up on first layout.
   ApplyTheme();
@@ -382,27 +400,6 @@ CefSize BrowserWindow::GetPreferredSize(CefRefPtr<CefView> view) {
     return CefSize(kDefaultWidth, kDefaultHeight);
   }
   return CefSize();
-}
-
-namespace {
-// Decodes the embedded OpenNyx PNG into a CefImage once and caches it.
-CefRefPtr<CefImage> GetAppIconImage() {
-  static CefRefPtr<CefImage> image;
-  if (!image) {
-    image = CefImage::CreateImage();
-    image->AddPNG(1.0f, kOpenNyxIconPng, kOpenNyxIconPngSize);
-  }
-  return image;
-}
-}  // namespace
-
-CefRefPtr<CefImage> BrowserWindow::GetWindowIcon(CefRefPtr<CefWindow> window) {
-  return GetAppIconImage();
-}
-
-CefRefPtr<CefImage> BrowserWindow::GetWindowAppIcon(
-    CefRefPtr<CefWindow> window) {
-  return GetAppIconImage();
 }
 
 CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView> view) {
