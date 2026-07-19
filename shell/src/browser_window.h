@@ -87,6 +87,10 @@ class BrowserWindow : public CefWindowDelegate,
   CefSize GetPreferredSize(CefRefPtr<CefView> view) override;
   CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
   bool OnAccelerator(CefRefPtr<CefWindow> window, int command_id) override;
+  // The window title-bar icon and the taskbar icon. CEF Views ignores the
+  // .rc icon for these; it asks the delegate for a CefImage instead.
+  CefRefPtr<CefImage> GetWindowIcon(CefRefPtr<CefWindow> window) override;
+  CefRefPtr<CefImage> GetWindowAppIcon(CefRefPtr<CefWindow> window) override;
 
   // ---- CefBrowserViewDelegate ----
   ChromeToolbarType GetChromeToolbarType(
@@ -125,7 +129,6 @@ class BrowserWindow : public CefWindowDelegate,
   // address-bar textfield) so text is readable in our custom dark theme.
   void ApplyTheme();
   void AddAccelerators();
-  void SetWindowIconFromDisk();
 
   CefRefPtr<CefBrowserView> ActiveBrowserView();
   CefRefPtr<CefBrowser> ActiveBrowser();

@@ -11,6 +11,8 @@
 
 #include "include/cef_color_ids.h"
 #include "include/cef_cookie.h"
+#include "include/cef_image.h"
+#include "app_icon_png.h"
 #include "include/cef_parser.h"
 #include "include/cef_request_context.h"
 #include "include/views/cef_box_layout.h"
@@ -380,6 +382,27 @@ CefSize BrowserWindow::GetPreferredSize(CefRefPtr<CefView> view) {
     return CefSize(kDefaultWidth, kDefaultHeight);
   }
   return CefSize();
+}
+
+namespace {
+// Decodes the embedded OpenNyx PNG into a CefImage once and caches it.
+CefRefPtr<CefImage> GetAppIconImage() {
+  static CefRefPtr<CefImage> image;
+  if (!image) {
+    image = CefImage::CreateImage();
+    image->AddPNG(1.0f, kOpenNyxIconPng, kOpenNyxIconPngSize);
+  }
+  return image;
+}
+}  // namespace
+
+CefRefPtr<CefImage> BrowserWindow::GetWindowIcon(CefRefPtr<CefWindow> window) {
+  return GetAppIconImage();
+}
+
+CefRefPtr<CefImage> BrowserWindow::GetWindowAppIcon(
+    CefRefPtr<CefWindow> window) {
+  return GetAppIconImage();
 }
 
 CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView> view) {
