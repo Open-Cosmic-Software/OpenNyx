@@ -3,8 +3,12 @@ build/
 dist/
 out/
 
-# CEF binary distribution (downloaded at configure time, never committed)
-shell/third_party/
+# CEF binary distribution (downloaded at configure time, never committed).
+# Vendored header-only libraries under third_party/ (e.g. json) ARE committed;
+# only the downloaded CEF distribution is ignored.
+shell/third_party/cef/
+shell/third_party/*.tar.bz2
+shell/third_party/*.tar.bz2.sha1
 
 # Node
 node_modules/

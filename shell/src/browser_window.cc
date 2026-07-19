@@ -10,12 +10,19 @@
 #include <string>
 
 #include "include/cef_color_ids.h"
+#include "include/cef_cookie.h"
 #include "include/cef_parser.h"
+#include "include/cef_request_context.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_fill_layout.h"
 #include "include/wrapper/cef_helpers.h"
+#include "include/wrapper/cef_closure_task.h"
+#include "include/base/cef_callback.h"
+#include "include/cef_task.h"
 
+#include "blocklist.h"
 #include "opennyx_client.h"
+#include "store.h"
 
 namespace {
 
@@ -32,6 +39,9 @@ enum ViewID {
   ID_HOME_BUTTON,
   ID_NEW_TAB_BUTTON,
   ID_ADDRESS_BAR,
+  ID_STAR_BUTTON,
+  ID_SHIELD_BUTTON,
+  ID_MENU_BUTTON,
   // Tab views use ID_TAB_FIRST + tab_id * 2 (+1 for the close button).
   ID_TAB_FIRST = 1000,
 };
@@ -49,6 +59,10 @@ enum CommandID {
   CMD_BACK,
   CMD_FORWARD,
   CMD_DEVTOOLS,
+  CMD_HISTORY,
+  CMD_BOOKMARK,
+  CMD_DOWNLOADS,
+  CMD_SETTINGS,
 };
 
 // ---- Windows virtual key codes (avoid pulling in windows.h here) ----
@@ -58,6 +72,7 @@ constexpr int kVK_TAB = 0x09;
 constexpr int kVK_F5 = 0x74;
 constexpr int kVK_LEFT = 0x25;
 constexpr int kVK_RIGHT = 0x27;
+constexpr int VK_OEM_COMMA = 0xBC;  // ',' key.
 
 // ---- Dark theme palette ----
 // A cohesive, slightly blue-tinted charcoal theme with a purple accent that
@@ -155,6 +170,19 @@ class PopupWindowDelegate : public CefWindowDelegate {
 // ---------------------------------------------------------------------------
 
 std::string GetNewTabURL() {
+  // The new-tab / homepage is now served by the privileged opennyx:// scheme
+  // (see scheme_handler.cc / pages.cc), which allows rich, interactive pages
+  // that talk to the browser via the opennyx://api bridge. The homepage is
+  // user-configurable in Settings.
+  const AppConfig cfg = OpenNyxStore::Get()->GetConfig();
+  if (!cfg.homepage.empty()) {
+    return cfg.homepage;
+  }
+  return "opennyx://newtab";
+}
+
+// Legacy self-contained data: new-tab page, retained as a fallback only.
+std::string GetLegacyNewTabURL() {
   static std::string url;
   if (url.empty()) {
     const char kHtml[] =
@@ -248,9 +276,8 @@ std::string ResolveAddressInput(const std::string& raw) {
     return "https://" + input;
   }
 
-  // Everything else -> Brave Search.
-  return "https://search.brave.com/search?q=" +
-         CefURIEncode(input, /*use_plus=*/true).ToString();
+  // Everything else -> the user's configured search engine (Brave by default).
+  return OpenNyxStore::Get()->BuildSearchURL(input);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +340,9 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   home_button_ = nullptr;
   new_tab_button_ = nullptr;
   address_bar_ = nullptr;
+  star_button_ = nullptr;
+  shield_button_ = nullptr;
+  menu_button_ = nullptr;
   tabs_.clear();
   g_browser_window = nullptr;
 }
@@ -400,6 +430,18 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window, int command_id) {
                                          CefBrowserSettings(), CefPoint());
       }
       return true;
+    case CMD_HISTORY:
+      CreateTab("opennyx://history", /*select=*/true);
+      return true;
+    case CMD_BOOKMARK:
+      ToggleBookmarkActiveTab();
+      return true;
+    case CMD_DOWNLOADS:
+      CreateTab("opennyx://downloads", /*select=*/true);
+      return true;
+    case CMD_SETTINGS:
+      CreateTab("opennyx://settings", /*select=*/true);
+      return true;
     default:
       return false;
   }
@@ -482,6 +524,16 @@ void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
     case ID_NEW_TAB_BUTTON:
       CreateTab(GetNewTabURL(), /*select=*/true);
       return;
+    case ID_STAR_BUTTON:
+      ToggleBookmarkActiveTab();
+      return;
+    case ID_SHIELD_BUTTON:
+      // Show settings (privacy dashboard) when the shield is clicked.
+      CreateTab("opennyx://settings", /*select=*/true);
+      return;
+    case ID_MENU_BUTTON:
+      CreateTab("opennyx://settings", /*select=*/true);
+      return;
     default:
       break;
   }
@@ -529,9 +581,14 @@ void BrowserWindow::OnBrowserAddressChange(CefRefPtr<CefBrowser> browser,
   // Don't clobber the user's typing.
   if (address_bar_ && !address_bar_->HasFocus()) {
     const std::string spec = url.ToString();
-    // Hide the noisy data: URL of the new-tab page.
-    address_bar_->SetText(spec.compare(0, 5, "data:") == 0 ? "" : spec);
+    // Hide the noisy data: URL of the legacy new-tab page and our own
+    // opennyx://newtab homepage (show an empty, inviting address bar).
+    const bool hide = spec.compare(0, 5, "data:") == 0 ||
+                      spec == "opennyx://newtab" ||
+                      spec == "opennyx://newtab/";
+    address_bar_->SetText(hide ? "" : spec);
   }
+  UpdateChrome();
 }
 
 void BrowserWindow::OnBrowserLoadingStateChange(CefRefPtr<CefBrowser> browser,
@@ -717,6 +774,7 @@ void BrowserWindow::SelectTab(size_t index) {
   if (window_) {
     window_->InvalidateLayout();
   }
+  UpdateChrome();
   tabs_[index].browser_view->RequestFocus();
 }
 
@@ -854,11 +912,23 @@ void BrowserWindow::BuildUI() {
   address_bar_->SetPlaceholderText("Search with Brave or enter address");
   address_bar_->SetAccessibleName("Address and search bar");
 
+  // Shield (blocked-request count), star (bookmark), menu (settings).
+  shield_button_ = make_nav_button("\xF0\x9F\x9B\xA1", ID_SHIELD_BUTTON,
+                                   "Trackers blocked on this site");
+  shield_button_->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorTextDim);
+  star_button_ = make_nav_button("\xE2\x98\x86", ID_STAR_BUTTON,
+                                 "Bookmark this page (Ctrl+D)");
+  menu_button_ = make_nav_button("\xE2\x98\xB0", ID_MENU_BUTTON,
+                                 "Menu / Settings (Ctrl+,)");
+
   toolbar_->AddChildView(back_button_);
   toolbar_->AddChildView(forward_button_);
   toolbar_->AddChildView(reload_button_);
   toolbar_->AddChildView(home_button_);
   toolbar_->AddChildView(address_bar_);
+  toolbar_->AddChildView(shield_button_);
+  toolbar_->AddChildView(star_button_);
+  toolbar_->AddChildView(menu_button_);
   tb_layout->SetFlexForView(address_bar_, 1);
 
   window_->AddChildView(tab_strip_);
@@ -879,6 +949,12 @@ void BrowserWindow::AddAccelerators() {
   window_->SetAccelerator(CMD_BACK, kVK_LEFT, false, false, true, true);
   window_->SetAccelerator(CMD_FORWARD, kVK_RIGHT, false, false, true, true);
   window_->SetAccelerator(CMD_DEVTOOLS, 'I', true, true, false, true);
+  // M3 pages: Ctrl+H history, Ctrl+D bookmark, Ctrl+J downloads,
+  // Ctrl+, settings.
+  window_->SetAccelerator(CMD_HISTORY, 'H', false, true, false, true);
+  window_->SetAccelerator(CMD_BOOKMARK, 'D', false, true, false, true);
+  window_->SetAccelerator(CMD_DOWNLOADS, 'J', false, true, false, true);
+  window_->SetAccelerator(CMD_SETTINGS, VK_OEM_COMMA, false, true, false, true);
 }
 
 CefRefPtr<CefBrowserView> BrowserWindow::ActiveBrowserView() {
@@ -953,5 +1029,101 @@ void BrowserWindow::NavigateActiveTab(const std::string& input) {
   browser->GetMainFrame()->LoadURL(url);
   if (CefRefPtr<CefBrowserView> view = ActiveBrowserView()) {
     view->RequestFocus();
+  }
+}
+
+// ---- M3/M4: bookmarks star + tracker shield ----
+
+std::string BrowserWindow::GetBrowserTitle(CefRefPtr<CefBrowser> browser) {
+  const int index = FindTabIndex(CefBrowserView::GetForBrowser(browser));
+  if (index < 0) {
+    return std::string();
+  }
+  return tabs_[index].title;
+}
+
+void BrowserWindow::RefreshChromeForBrowser(CefRefPtr<CefBrowser> browser) {
+  const int index = FindTabIndex(CefBrowserView::GetForBrowser(browser));
+  if (index < 0 || static_cast<size_t>(index) != active_tab_) {
+    return;
+  }
+  UpdateChrome();
+}
+
+void BrowserWindow::UpdateChrome() {
+  CefRefPtr<CefBrowser> browser = ActiveBrowser();
+  if (!browser) {
+    return;
+  }
+  const std::string url = browser->GetMainFrame()->GetURL().ToString();
+
+  // Star: filled if bookmarked.
+  if (star_button_) {
+    const bool marked = OpenNyxStore::Get()->IsBookmarked(url);
+    star_button_->SetText(marked ? "\xE2\x98\x85" : "\xE2\x98\x86");  // ★ / ☆
+    star_button_->SetTextColor(CEF_BUTTON_STATE_NORMAL,
+                               marked ? kColorAccent : kColorText);
+  }
+
+  // Shield: show per-site blocked count.
+  if (shield_button_) {
+    CefURLParts parts;
+    std::string host;
+    if (CefParseURL(url, parts)) {
+      host = CefString(&parts.host).ToString();
+    }
+    const int count = OpenNyxBlocklist::Get()->GetCount(host);
+    std::string label = "\xF0\x9F\x9B\xA1";  // 🛡
+    if (count > 0) {
+      label += " " + std::to_string(count);
+    }
+    shield_button_->SetText(label);
+    shield_button_->SetTextColor(
+        CEF_BUTTON_STATE_NORMAL,
+        count > 0 ? kColorAccent : kColorTextDim);
+    shield_button_->SetTooltipText(
+        OpenNyxBlocklist::Get()->enabled()
+            ? (count > 0
+                   ? (std::to_string(count) + " trackers blocked on this site")
+                   : std::string("Tracker blocking on"))
+            : std::string("Tracker blocking off"));
+  }
+}
+
+void BrowserWindow::ToggleBookmarkActiveTab() {
+  CefRefPtr<CefBrowser> browser = ActiveBrowser();
+  if (!browser) {
+    return;
+  }
+  const std::string url = browser->GetMainFrame()->GetURL().ToString();
+  if (url.empty() || url.compare(0, 5, "data:") == 0) {
+    return;
+  }
+  OpenNyxStore* store = OpenNyxStore::Get();
+  if (store->IsBookmarked(url)) {
+    store->RemoveBookmark(url);
+  } else {
+    const int index = FindTabIndex(CefBrowserView::GetForBrowser(browser));
+    const std::string title =
+        index >= 0 ? tabs_[index].title : std::string();
+    store->AddBookmark(url, title);
+  }
+  UpdateChrome();
+}
+
+// static
+void BrowserWindow::RequestClearBrowsingData() {
+  if (!CefCurrentlyOn(TID_UI)) {
+    CefPostTask(TID_UI,
+                base::BindOnce(&BrowserWindow::RequestClearBrowsingData));
+    return;
+  }
+  // Clear cookies + cache via the global request context.
+  CefRefPtr<CefRequestContext> ctx = CefRequestContext::GetGlobalContext();
+  if (ctx) {
+    CefRefPtr<CefCookieManager> cookies = ctx->GetCookieManager(nullptr);
+    if (cookies) {
+      cookies->DeleteCookies(CefString(), CefString(), nullptr);
+    }
   }
 }

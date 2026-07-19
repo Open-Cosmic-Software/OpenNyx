@@ -28,6 +28,8 @@ class OpenNyxApp : public CefApp, public CefBrowserProcessHandler {
   void OnBeforeCommandLineProcessing(
       const CefString& process_type,
       CefRefPtr<CefCommandLine> command_line) override;
+  void OnRegisterCustomSchemes(
+      CefRawPtr<CefSchemeRegistrar> registrar) override;
 
   // CefBrowserProcessHandler methods:
   void OnContextInitialized() override;

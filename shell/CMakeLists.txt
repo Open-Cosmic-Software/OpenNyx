@@ -79,6 +79,14 @@ set(OPENNYX_SRCS
   src/opennyx_app.h
   src/opennyx_client.cc
   src/opennyx_client.h
+  src/store.cc
+  src/store.h
+  src/blocklist.cc
+  src/blocklist.h
+  src/pages.cc
+  src/pages.h
+  src/scheme_handler.cc
+  src/scheme_handler.h
 )
 
 if(OS_WINDOWS)
@@ -102,10 +110,14 @@ if(OS_WINDOWS)
                         ${CEF_STANDARD_LIBS})
 
   target_include_directories(${CEF_TARGET} PRIVATE
-                             "${CMAKE_CURRENT_SOURCE_DIR}/src")
+                             "${CMAKE_CURRENT_SOURCE_DIR}/src"
+                             "${CMAKE_CURRENT_SOURCE_DIR}")
 
   # Source files contain UTF-8 string literals (button glyphs).
   target_compile_options(${CEF_TARGET} PRIVATE "/utf-8")
+  # nlohmann/json needs a bigger MSVC constexpr step limit for some builds and
+  # exceptions enabled (used for tolerant parsing).
+  target_compile_options(${CEF_TARGET} PRIVATE "/bigobj")
 
   # Embed the application manifests (common controls + supported OS list).
   ADD_WINDOWS_MANIFEST("${CMAKE_CURRENT_SOURCE_DIR}/win" "${CEF_TARGET}" "exe")

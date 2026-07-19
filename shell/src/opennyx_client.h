@@ -8,6 +8,9 @@
 #include <list>
 
 #include "include/cef_client.h"
+#include "include/cef_download_handler.h"
+#include "include/cef_request_handler.h"
+#include "include/cef_resource_request_handler.h"
 
 // Browser-level callbacks shared by all OpenNyx browsers (i.e. all tabs and
 // windows). With the Chrome runtime style, Chromium itself owns the tab strip
@@ -16,7 +19,10 @@
 class OpenNyxClient : public CefClient,
                       public CefDisplayHandler,
                       public CefLifeSpanHandler,
-                      public CefLoadHandler {
+                      public CefLoadHandler,
+                      public CefDownloadHandler,
+                      public CefRequestHandler,
+                      public CefResourceRequestHandler {
  public:
   OpenNyxClient();
   ~OpenNyxClient() override;
@@ -28,6 +34,8 @@ class OpenNyxClient : public CefClient,
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+  CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
   // CefDisplayHandler methods:
   void OnTitleChange(CefRefPtr<CefBrowser> browser,
@@ -46,11 +54,42 @@ class OpenNyxClient : public CefClient,
                             bool isLoading,
                             bool canGoBack,
                             bool canGoForward) override;
+  void OnLoadEnd(CefRefPtr<CefBrowser> browser,
+                 CefRefPtr<CefFrame> frame,
+                 int httpStatusCode) override;
   void OnLoadError(CefRefPtr<CefBrowser> browser,
                    CefRefPtr<CefFrame> frame,
                    ErrorCode errorCode,
                    const CefString& errorText,
                    const CefString& failedUrl) override;
+
+  // CefDownloadHandler methods:
+  bool OnBeforeDownload(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefDownloadItem> download_item,
+      const CefString& suggested_name,
+      CefRefPtr<CefBeforeDownloadCallback> callback) override;
+  void OnDownloadUpdated(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefDownloadItem> download_item,
+      CefRefPtr<CefDownloadItemCallback> callback) override;
+
+  // CefRequestHandler methods:
+  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      CefRefPtr<CefRequest> request,
+      bool is_navigation,
+      bool is_download,
+      const CefString& request_initiator,
+      bool& disable_default_handling) override;
+
+  // CefResourceRequestHandler methods:
+  cef_return_value_t OnBeforeResourceLoad(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      CefRefPtr<CefRequest> request,
+      CefRefPtr<CefCallback> callback) override;
 
   // Request that all existing browser windows close.
   void CloseAllBrowsers(bool force_close);

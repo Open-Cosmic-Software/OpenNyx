@@ -50,6 +50,17 @@ class BrowserWindow : public CefWindowDelegate,
   // Returns true if |browser| belonged to this window (i.e. was a tab).
   bool OnBrowserClosed(CefRefPtr<CefBrowser> browser);
 
+  // Returns the cached page title for |browser| (empty if unknown).
+  std::string GetBrowserTitle(CefRefPtr<CefBrowser> browser);
+
+  // Refreshes the toolbar shield count + bookmark star for |browser| if it is
+  // the active tab. Safe to call from the UI thread.
+  void RefreshChromeForBrowser(CefRefPtr<CefBrowser> browser);
+
+  // Clears cookies + cache for the whole browser (invoked by the settings
+  // page "clear browsing data"). Static: posts to the UI thread.
+  static void RequestClearBrowsingData();
+
   // Number of open tabs.
   size_t tab_count() const { return tabs_.size(); }
 
@@ -122,6 +133,14 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefLabelButton> home_button_;
   CefRefPtr<CefLabelButton> new_tab_button_;
   CefRefPtr<CefTextfield> address_bar_;
+  CefRefPtr<CefLabelButton> star_button_;    // bookmark toggle.
+  CefRefPtr<CefLabelButton> shield_button_;  // blocked-request count.
+  CefRefPtr<CefLabelButton> menu_button_;    // opens settings.
+
+  // Updates the star (filled/hollow) + shield count from the active tab URL.
+  void UpdateChrome();
+  // Toggles the bookmark state of the active tab.
+  void ToggleBookmarkActiveTab();
 
   std::vector<Tab> tabs_;
   size_t active_tab_ = 0;

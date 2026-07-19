@@ -13,8 +13,32 @@
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 
+#include "blocklist.h"
 #include "browser_window.h"
 #include "opennyx_client.h"
+#include "scheme_handler.h"
+#include "store.h"
+
+namespace {
+
+// Maps a resolver id to its RFC 8484 DoH URI template. Non-US resolvers are
+// offered first (Quad9 = Switzerland, Mullvad = Sweden); Cloudflare is the
+// default because it is fast and widely reachable.
+std::string DohTemplateFor(const AppConfig& cfg) {
+  if (cfg.doh_resolver == "quad9") {
+    return "https://dns.quad9.net/dns-query";
+  }
+  if (cfg.doh_resolver == "mullvad") {
+    return "https://dns.mullvad.net/dns-query";
+  }
+  if (cfg.doh_resolver == "custom" && !cfg.doh_custom_template.empty()) {
+    return cfg.doh_custom_template;
+  }
+  // Default: Cloudflare.
+  return "https://cloudflare-dns.com/dns-query";
+}
+
+}  // namespace
 
 OpenNyxApp::OpenNyxApp() = default;
 
@@ -43,11 +67,38 @@ void OpenNyxApp::OnBeforeCommandLineProcessing(
     command_line->AppendSwitch("no-default-browser-check");
     // Note: the user agent is deliberately left at the stock Chromium value.
     // A custom UA would only add fingerprinting surface.
+
+    // --- M4: DNS-over-HTTPS (secure mode) ---
+    // Encrypt DNS lookups by default. "secure" mode uses ONLY the configured
+    // DoH resolver (no plaintext fallback). The resolver is user-selectable
+    // in Settings; the choice is applied at startup here.
+    const AppConfig cfg = OpenNyxStore::Get()->GetConfig();
+    if (cfg.doh_enabled) {
+      command_line->AppendSwitchWithValue("dns-over-https-mode", "secure");
+      command_line->AppendSwitchWithValue("dns-over-https-templates",
+                                          DohTemplateFor(cfg));
+    }
+
+    // Keep the blocklist toggle in sync with persisted config at startup.
+    // (The actual blocking happens in OpenNyxClient's resource handler.)
   }
+}
+
+void OpenNyxApp::OnRegisterCustomSchemes(
+    CefRawPtr<CefSchemeRegistrar> registrar) {
+  RegisterOpenNyxCustomScheme(registrar);
 }
 
 void OpenNyxApp::OnContextInitialized() {
   CEF_REQUIRE_UI_THREAD();
+
+  // Register the opennyx:// scheme handler factory (privileged UI pages +
+  // the JSON bridge). Must happen after CefInitialize.
+  RegisterOpenNyxSchemeHandlerFactory();
+
+  // Sync the runtime blocklist toggle with persisted settings.
+  OpenNyxBlocklist::Get()->SetEnabled(
+      OpenNyxStore::Get()->GetConfig().blocking_enabled);
 
   CefRefPtr<CefCommandLine> command_line =
       CefCommandLine::GetGlobalCommandLine();
