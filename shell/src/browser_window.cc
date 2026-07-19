@@ -782,20 +782,24 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
   tab.tab_panel->AddChildView(tab.tab_button);
   tab.tab_panel->AddChildView(tab.close_button);
 
-    // Insert the tab panel at the position of the trailing new-tab button, so
-  // tab order is: [tab][tab]...[+ button][flexible spacer][min][max][close].
-  // Simply appending would drop the new tab AFTER the window controls (which
-  // pushed the tabs to the right and the controls to the left).
-  tabs_.push_back(tab);
-  if (tab_strip_) {
-    int insert_at = 0;
-    for (size_t i = 0; i < tab_strip_->GetChildViewCount(); ++i) {
-      if (tab_strip_->GetChildViewAt(static_cast<int>(i)) == new_tab_button_) {
-        insert_at = static_cast<int>(i);
-        break;
-      }
+  // Insert the new tab directly to the RIGHT of the currently-active tab
+  // (like every mainstream browser), not at the far end. The tab strip's
+  // child order is [tab_0][tab_1]...[+ button][spacer][min][max][close], so a
+  // tab at tab-index k sits at strip-child-index k -- the vector index and the
+  // strip child index stay in lock-step as long as we insert into both at the
+  // same position.
+  size_t insert_index;
+  if (select && !tabs_.empty()) {
+    insert_index = active_tab_ + 1;
+    if (insert_index > tabs_.size()) {
+      insert_index = tabs_.size();
     }
-    tab_strip_->AddChildViewAt(tab.tab_panel, insert_at);
+  } else {
+    insert_index = tabs_.size();
+  }
+  tabs_.insert(tabs_.begin() + insert_index, tab);
+  if (tab_strip_) {
+    tab_strip_->AddChildViewAt(tab.tab_panel, static_cast<int>(insert_index));
   }
 
   // Browser views stack in the content area; only the active one is visible.
@@ -807,7 +811,7 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
   }
 
   if (select) {
-    SelectTab(tabs_.size() - 1);
+    SelectTab(insert_index);
     // A brand-new tab always opens the new-tab page. Clear the address bar
     // immediately and unconditionally: at this point the new browser may not
     // be attached yet (GetBrowser() null) or may briefly report about:blank,
