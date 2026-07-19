@@ -267,9 +267,9 @@ bool OpenNyxClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
            std::string(host->HasDevTools() ? "yes" : "no"));
     CefPoint inspect_at(params ? params->GetXCoord() : 0,
                         params ? params->GetYCoord() : 0);
-    DevLog("4. calling ShowDevTools");
-    host->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(),
-                       inspect_at);
+    DevLog("4. calling ShowDevTools with dedicated DevToolsClient");
+    host->ShowDevTools(CefWindowInfo(), new DevToolsClient(),
+                       CefBrowserSettings(), inspect_at);
     DevLog("5. ShowDevTools returned (no crash in the call itself)");
     return true;
   }

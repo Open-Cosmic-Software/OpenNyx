@@ -596,7 +596,9 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window, int command_id) {
       return true;
     case CMD_DEVTOOLS:
       if (browser) {
-        browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr,
+        // Dedicated DevToolsClient (not our main client, whose handlers assume
+        // every browser is a tab -> crash). See DevToolsClient in the header.
+        browser->GetHost()->ShowDevTools(CefWindowInfo(), new DevToolsClient(),
                                          CefBrowserSettings(), CefPoint());
       }
       return true;

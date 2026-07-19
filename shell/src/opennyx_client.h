@@ -123,4 +123,24 @@ class OpenNyxClient : public CefClient,
   IMPLEMENT_REFCOUNTING(OpenNyxClient);
 };
 
+// Dedicated, minimal client for the DevTools browser. DevTools must NOT share
+// the main OpenNyxClient: that client's handlers assume every browser is a tab
+// in the main window (tab lookup, address-bar sync, load-state -> toolbar),
+// so routing the DevTools browser through them crashes. This client keeps just
+// the context-menu handler (so DevTools' own right-click menu works) and does
+// nothing window-specific.
+class DevToolsClient : public CefClient, public CefContextMenuHandler {
+ public:
+  DevToolsClient() = default;
+
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
+    return this;
+  }
+
+  DevToolsClient(const DevToolsClient&) = delete;
+  DevToolsClient& operator=(const DevToolsClient&) = delete;
+
+  IMPLEMENT_REFCOUNTING(DevToolsClient);
+};
+
 #endif  // OPENNYX_SHELL_SRC_OPENNYX_CLIENT_H_
