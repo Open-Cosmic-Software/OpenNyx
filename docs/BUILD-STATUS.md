@@ -1,6 +1,30 @@
 # Build Status
 
-_Last updated: 2026-07-19 (M3 + M4 + Alloy runtime-style fix + custom-scheme render-process fix)_
+_Last updated: 2026-07-19 (M3 + M4 + Alloy runtime-style fix + custom-scheme render-process fix + single-tab-close regression fix)_
+
+## Tab close (regression fix, 2026-07-19)
+
+A prior fix used a "detach the CefBrowserView from the window, THEN
+CloseBrowser(force_close=true)" scheme inside `CloseTabAt()`. On Windows this
+made closing ONE tab tear down the ENTIRE window (all tabs / the app quit).
+
+**Root cause:** synchronously `RemoveChildView`-ing a live, visible
+CefBrowserView and force-closing its browser while other BrowserViews share the
+same CefWindow cascades the widget destruction up into the top-level window.
+The hand-rolled ordering was fighting CEF's async close lifecycle.
+
+**Fix (cefclient Views multi-browser pattern):** the tab close is now purely
+asynchronous and single-authority.
+- `CloseTabAt(i)` only calls `browser->GetHost()->CloseBrowser(false)` on THAT
+  one browser (marks the tab `closing`). It does NOT remove the tab, detach the
+  view, or touch the window.
+- `DoClose()` returns false (allow). `OnBeforeClose` -> `OnBrowserClosed()` is
+  the ONLY place a tab + its view are removed, and it closes the top-level
+  window (once, guarded by `window_close_issued_`) only when the LAST tab is
+  gone.
+- `CanClose()` is now only for a whole-window close (OS × / last-tab): it
+  requests-close every remaining browser and returns false until they are all
+  gone, then allows the close. A single-tab close never depends on it.
 
 ## Current state: M3 (everyday features) + M4 (privacy layer)
 
@@ -11,6 +35,7 @@ M3/M4 features below. See the Actions tab for the latest run.
 |---|---|
 | Windows x64 CI build (`OpenNyx-win64` artifact) | ✅ green |
 | Custom Views UI (tab strip, toolbar, address bar) | ✅ |
+| Single-tab close (× / Ctrl+W closes ONE tab, not the window) | ✅ fixed 2026-07-19 |
 | `opennyx://` privileged scheme (pages + JSON bridge) | ✅ |
 | **History** (record + `opennyx://history` list/search/clear) | ✅ |
 | **Bookmarks** (star button + `opennyx://bookmarks`) | ✅ |

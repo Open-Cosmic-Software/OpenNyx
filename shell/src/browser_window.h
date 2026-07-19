@@ -117,6 +117,10 @@ class BrowserWindow : public CefWindowDelegate,
     CefRefPtr<CefLabelButton> close_button;
     std::string title;
     int id = 0;  // Unique tab id (basis for view ids).
+    // True once CloseBrowser() has been kicked off for this tab, so a rapid
+    // second × click / Ctrl+W does not request a second close of the same
+    // browser. The tab is only removed later, in OnBrowserClosed().
+    bool closing = false;
   };
 
   // Builds the tab strip + toolbar and attaches everything to |window_|.
@@ -131,6 +135,9 @@ class BrowserWindow : public CefWindowDelegate,
   int FindTabIndex(CefRefPtr<CefBrowserView> view);
   void CloseTabAt(size_t index);
   void RemoveTabAt(size_t index);
+  // Issues the real top-level window close exactly once (idempotent). Called
+  // when the last tab's browser has finished closing.
+  void MaybeCloseWindow();
   void UpdateTabStrip();
   void UpdateWindowTitle();
   void FocusAddressBar();
@@ -157,7 +164,9 @@ class BrowserWindow : public CefWindowDelegate,
   std::vector<Tab> tabs_;
   size_t active_tab_ = 0;
   int next_tab_id_ = 1;
-  bool closing_ = false;
+  // Set once we have issued the real window_->Close() so it is never issued
+  // twice (guards re-entrant / double window teardown).
+  bool window_close_issued_ = false;
   std::string pending_initial_url_;
 
   IMPLEMENT_REFCOUNTING(BrowserWindow);
