@@ -32,6 +32,19 @@ namespace {
 
 BrowserWindow* g_browser_window = nullptr;
 
+// Temporary diagnostic tracer for the "new tab keeps old URL" bug. Writes to
+// opennyx-addr.log next to the exe. Removed once the bug is understood.
+void AddrLog(const std::string& msg) {
+  static FILE* f = nullptr;
+  if (!f) {
+    f = fopen("opennyx-addr.log", "a");
+  }
+  if (f) {
+    fprintf(f, "%s\n", msg.c_str());
+    fflush(f);
+  }
+}
+
 
 // ---- View ids ----
 enum ViewID {
@@ -673,8 +686,12 @@ void BrowserWindow::OnBrowserAddressChange(CefRefPtr<CefBrowser> browser,
     return;
   }
   // Don't clobber the user's typing.
+  const std::string spec = url.ToString();
+  AddrLog(std::string("OnAddrChange idx=") + std::to_string(index) +
+          " active=" + std::to_string(active_tab_) + " url=[" + spec +
+          "] barFocus=" +
+          (address_bar_ && address_bar_->HasFocus() ? "1" : "0"));
   if (address_bar_ && !address_bar_->HasFocus()) {
-    const std::string spec = url.ToString();
     address_bar_->SetText(ShouldHideUrlInAddressBar(spec) ? "" : spec);
   }
   UpdateChrome();
@@ -782,12 +799,20 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
   tab.tab_panel->AddChildView(tab.tab_button);
   tab.tab_panel->AddChildView(tab.close_button);
 
-  // Insert before the trailing new-tab button.
+    // Insert the tab panel at the position of the trailing new-tab button, so
+  // tab order is: [tab][tab]...[+ button][flexible spacer][min][max][close].
+  // Simply appending would drop the new tab AFTER the window controls (which
+  // pushed the tabs to the right and the controls to the left).
   tabs_.push_back(tab);
   if (tab_strip_) {
-    tab_strip_->RemoveChildView(new_tab_button_);
-    tab_strip_->AddChildView(tab.tab_panel);
-    tab_strip_->AddChildView(new_tab_button_);
+    int insert_at = 0;
+    for (size_t i = 0; i < tab_strip_->GetChildViewCount(); ++i) {
+      if (tab_strip_->GetChildViewAt(static_cast<int>(i)) == new_tab_button_) {
+        insert_at = static_cast<int>(i);
+        break;
+      }
+    }
+    tab_strip_->AddChildViewAt(tab.tab_panel, insert_at);
   }
 
   // Browser views stack in the content area; only the active one is visible.
@@ -805,6 +830,8 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
     // be attached yet (GetBrowser() null) or may briefly report about:blank,
     // either of which would otherwise leave the PREVIOUS tab's URL visible.
     // OnBrowserAddressChange will fill in a real URL once the user navigates.
+    AddrLog(std::string("CreateTab select clear barFocus=") +
+            (address_bar_ && address_bar_->HasFocus() ? "1" : "0"));
     if (address_bar_ && !address_bar_->HasFocus()) {
       address_bar_->SetText("");
     }
@@ -938,12 +965,17 @@ void BrowserWindow::SelectTab(size_t index) {
 
   // Sync toolbar state with the newly active tab.
   CefRefPtr<CefBrowser> browser = tabs_[index].browser_view->GetBrowser();
+  AddrLog(std::string("SelectTab idx=") + std::to_string(index) +
+          " browser=" + (browser ? "yes" : "NULL") + " barFocus=" +
+          (address_bar_ && address_bar_->HasFocus() ? "1" : "0"));
   if (browser) {
     // Always sync the address bar to the newly-activated tab. (No HasFocus
     // guard here: switching tabs is an explicit user action and must show the
     // new tab's URL, even if the address bar happened to hold focus.)
     if (address_bar_) {
       const std::string url = browser->GetMainFrame()->GetURL().ToString();
+      AddrLog(std::string("  SelectTab if-branch url=[") + url + "] hide=" +
+              (ShouldHideUrlInAddressBar(url) ? "1" : "0"));
       address_bar_->SetText(ShouldHideUrlInAddressBar(url) ? "" : url);
     }
     if (back_button_) {
