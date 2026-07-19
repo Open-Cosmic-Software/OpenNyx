@@ -69,6 +69,21 @@ void OpenNyxApp::OnBeforeCommandLineProcessing(
     // Skip first-run and default-browser nagging.
     command_line->AppendSwitch("no-first-run");
     command_line->AppendSwitch("no-default-browser-check");
+    // Kill the Google "variations"/field-trial seed fetch (variations.
+    // googleapis.com) that Chromium normally pulls at startup. Point the
+    // server URLs at nothing and stop applying the on-disk field-trial config.
+    command_line->AppendSwitch("disable-field-trial-config");
+    command_line->AppendSwitchWithValue("variations-server-url", "");
+    command_line->AppendSwitchWithValue("variations-insecure-server-url", "");
+    // No Safe Browsing lookups to Google (URL/download reputation checks).
+    command_line->AppendSwitch("safebrowsing-disable-auto-update");
+    // Disable remaining phone-home features: Translate (sends page language /
+    // text to Google), the Optimization Hints service, and the Media Router /
+    // Cast discovery that probes the local network.
+    command_line->AppendSwitchWithValue(
+        "disable-features",
+        "Translate,OptimizationHints,MediaRouter,"
+        "OptimizationGuideModelDownloading,InterestFeedContentSuggestions");
     // Note: the user agent is deliberately left at the stock Chromium value.
     // A custom UA would only add fingerprinting surface.
 
