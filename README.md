@@ -31,7 +31,7 @@ services.
     ad/tracking requests at the network layer; a **toolbar shield** shows the
     per-site blocked count. Toggle-able in Settings.
   - **DNS-over-HTTPS** — on by default in *secure* mode; resolver selectable
-    (Cloudflare / Quad9 🇨🇭 / Mullvad 🇸🇪 / custom).
+    (Quad9 🇨🇭 default / DNS0.eu 🇪🇺 / Mullvad 🇸🇪 / Cloudflare US opt-in / custom).
   - **Network audit** — a documented, reproducible procedure to capture every
     outbound connection and verify the *de-googled at runtime* claim:
     [`docs/NETWORK-AUDIT.md`](docs/NETWORK-AUDIT.md).
