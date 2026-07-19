@@ -158,6 +158,30 @@ downloads` page polls `opennyx://api/downloads` for live progress bars.
 - Vendored `third_party/json/` is committed (the `.gitignore` now ignores only
   the downloaded CEF distribution, not vendored headers).
 
+## Fixed: tab close (× button + Ctrl+W) did nothing (2026-07-19)
+
+- **Symptom (Windows):** clicking the × on a tab, or pressing Ctrl+W, left the
+  tab in place. Nothing closed.
+- **Root cause:** OpenNyx hosts every tab as its own `CefBrowserView`, all
+  parented to ONE shared top-level `CefWindow`. The old `CloseTabAt()` called
+  `browser->GetHost()->TryCloseBrowser()` on a still-parented browser. For a
+  windowed browser, `DoClose()` returning false makes CEF route the close to
+  the browser's top-level parent window — i.e. `CefWindowDelegate::CanClose()`.
+  We intentionally cancel that in `CanClose()` (returns `tabs_.empty()`) to keep
+  the window open while other tabs live, so CEF cancelled the browser close and
+  the tab never went away. Confirmed against CEF issue #3376 and the
+  `cef_life_span_handler.h` DoClose contract.
+- **Fix:** In `CloseTabAt()`, detach the tab's `CefBrowserView` from the window
+  FIRST (`RemoveTabAt()` calls `window_->RemoveChildView(...)`), THEN call
+  `browser->GetHost()->CloseBrowser(/*force_close=*/true)`. A detached view has
+  no parent window for CEF to route the close request to, so only that single
+  browser is destroyed — the window and other tabs are untouched. `OnBeforeClose
+  -> OnBrowserClosed()` still fires but finds no matching tab (already removed),
+  so it is a harmless no-op (no double-remove/dangling tab). If the closed tab
+  was the last one, `CloseTabAt()` calls `window_->Close()`, and `CanClose()`
+  now sees `tabs_` empty and allows the window to close.
+- Ctrl+W uses the same path via `CloseActiveTab() -> CloseTabAt(active_tab_)`.
+
 ## Deferred (M5+)
 
 - Address-bar autocomplete surfaced in the Views textfield (the

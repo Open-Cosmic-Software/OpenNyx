@@ -741,12 +741,35 @@ void BrowserWindow::CloseTabAt(size_t index) {
   if (index >= tabs_.size()) {
     return;
   }
-  CefRefPtr<CefBrowser> browser = tabs_[index].browser_view->GetBrowser();
+
+  // Grab the browser + view before we mutate |tabs_|.
+  CefRefPtr<CefBrowserView> browser_view = tabs_[index].browser_view;
+  CefRefPtr<CefBrowser> browser = browser_view->GetBrowser();
+
+  // Detach this tab (removes its CefBrowserView from the window) and update the
+  // tab strip + active selection BEFORE closing the browser. This ordering is
+  // essential: several CefBrowserViews share one CefWindow here, and closing a
+  // still-parented browser (via TryCloseBrowser/CloseBrowser) makes CEF route
+  // the close request to the top-level window (CefWindowDelegate::CanClose()).
+  // We cancel that in CanClose() to keep the window alive, so the browser --
+  // and therefore the tab -- would never actually close. Detaching the view
+  // first leaves the browser with no parent window to route to, so only this
+  // browser closes. See CEF issue #3376 and magpcss forum t=19152.
+  RemoveTabAt(index);
+
+  // Now destroy the detached browser. Because its view is no longer parented to
+  // the window, this force-closes only this one browser. OnBeforeClose ->
+  // OnBrowserClosed() will still fire, but FindTabIndex() finds no matching tab
+  // (already removed), so it is a no-op -- no double-remove, no dangling tab.
   if (browser) {
-    // OnBrowserClosed() removes the tab once the browser is really gone.
-    browser->GetHost()->TryCloseBrowser();
-  } else {
-    RemoveTabAt(index);
+    browser->GetHost()->CloseBrowser(/*force_close=*/true);
+  }
+
+  // If that was the last tab, close the window for real. window_->Close()
+  // triggers CanClose(), which now sees tabs_ empty and allows the close.
+  if (tabs_.empty() && window_) {
+    closing_ = true;
+    window_->Close();
   }
 }
 
