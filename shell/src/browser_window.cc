@@ -9,6 +9,7 @@
 #include <cstring>
 #include <string>
 
+#include "include/cef_color_ids.h"
 #include "include/cef_parser.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_fill_layout.h"
@@ -28,6 +29,7 @@ enum ViewID {
   ID_BACK_BUTTON,
   ID_FORWARD_BUTTON,
   ID_RELOAD_BUTTON,
+  ID_HOME_BUTTON,
   ID_NEW_TAB_BUTTON,
   ID_ADDRESS_BAR,
   // Tab views use ID_TAB_FIRST + tab_id * 2 (+1 for the close button).
@@ -58,13 +60,30 @@ constexpr int kVK_LEFT = 0x25;
 constexpr int kVK_RIGHT = 0x27;
 
 // ---- Dark theme palette ----
+// A cohesive, slightly blue-tinted charcoal theme with a purple accent that
+// matches the OpenNyx wordmark on the new-tab page.
 constexpr cef_color_t kColorWindowBg = CefColorSetARGB(255, 24, 25, 30);
-constexpr cef_color_t kColorToolbarBg = CefColorSetARGB(255, 32, 33, 40);
-constexpr cef_color_t kColorTabActive = CefColorSetARGB(255, 48, 50, 60);
-constexpr cef_color_t kColorTabInactive = CefColorSetARGB(255, 28, 29, 35);
-constexpr cef_color_t kColorText = CefColorSetARGB(255, 225, 226, 232);
-constexpr cef_color_t kColorTextDim = CefColorSetARGB(255, 150, 152, 160);
-constexpr cef_color_t kColorFieldBg = CefColorSetARGB(255, 16, 17, 21);
+constexpr cef_color_t kColorToolbarBg = CefColorSetARGB(255, 34, 35, 43);
+constexpr cef_color_t kColorTabStripBg = CefColorSetARGB(255, 22, 23, 28);
+constexpr cef_color_t kColorTabActive = CefColorSetARGB(255, 52, 54, 66);
+constexpr cef_color_t kColorTabInactive = CefColorSetARGB(255, 30, 31, 38);
+constexpr cef_color_t kColorText = CefColorSetARGB(255, 232, 233, 240);
+constexpr cef_color_t kColorTextDim = CefColorSetARGB(255, 150, 152, 162);
+constexpr cef_color_t kColorAccent = CefColorSetARGB(255, 122, 92, 255);
+constexpr cef_color_t kColorButtonDisabled = CefColorSetARGB(255, 88, 90, 100);
+
+// Address-bar (textfield) colors. Readable light text on a lighter-than-window
+// input background — fixes the "black on black" bug. These are applied via
+// CefWindow::SetThemeColor() using the standard CEF_ColorTextfield* IDs, which
+// is the supported path in CEF 150 (the old per-textfield SetTextColor/
+// SetBackgroundColor setters are compiled out at the default API version).
+constexpr cef_color_t kColorFieldBg = CefColorSetARGB(255, 42, 42, 46);
+constexpr cef_color_t kColorFieldText = CefColorSetARGB(255, 240, 240, 240);
+constexpr cef_color_t kColorFieldPlaceholder = CefColorSetARGB(255, 148, 150, 160);
+constexpr cef_color_t kColorFieldSelectionBg = CefColorSetARGB(255, 122, 92, 255);
+constexpr cef_color_t kColorFieldSelectionText = CefColorSetARGB(255, 255, 255, 255);
+constexpr cef_color_t kColorFieldOutline = CefColorSetARGB(255, 60, 62, 74);
+constexpr cef_color_t kColorFieldOutlineFocused = CefColorSetARGB(255, 122, 92, 255);
 
 constexpr int kDefaultWidth = 1280;
 constexpr int kDefaultHeight = 800;
@@ -141,30 +160,56 @@ std::string GetNewTabURL() {
     const char kHtml[] =
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         "<title>New Tab</title><style>"
+        "*{box-sizing:border-box}"
         "html,body{height:100%;margin:0}"
-        "body{background:#18191e;color:#e1e2e8;display:flex;align-items:center;"
-        "justify-content:center;font-family:'Segoe UI',system-ui,sans-serif}"
-        ".wrap{text-align:center;width:min(620px,90vw);"
-        "transform:translateY(-8vh)}"
-        "h1{font-size:44px;font-weight:600;letter-spacing:.5px;margin:0 0 28px}"
+        "body{background:radial-gradient(1200px 700px at 50% -10%,"
+        "#20222c 0%,#17181e 55%,#141419 100%);color:#e8e9f0;display:flex;"
+        "align-items:center;justify-content:center;"
+        "font-family:'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}"
+        ".wrap{text-align:center;width:min(640px,90vw);transform:translateY(-6vh)}"
+        "h1{font-size:52px;font-weight:650;letter-spacing:.5px;margin:0 0 8px}"
         "h1 .nyx{color:#7a5cff}"
-        "form{display:flex;gap:0;box-shadow:0 6px 30px rgba(0,0,0,.45);"
-        "border-radius:12px;overflow:hidden;border:1px solid #303240}"
-        "input[type=search]{flex:1;padding:14px 18px;font-size:16px;border:0;"
-        "outline:none;background:#101115;color:#e1e2e8}"
-        "input[type=search]::placeholder{color:#969ba0}"
-        "button{padding:14px 22px;border:0;background:#7a5cff;color:#fff;"
-        "font-size:15px;font-weight:600;cursor:pointer}"
+        ".tag{margin:0 0 30px;font-size:14px;color:#8a8d99;letter-spacing:.3px}"
+        "form{display:flex;gap:0;box-shadow:0 10px 40px rgba(0,0,0,.5);"
+        "border-radius:14px;overflow:hidden;border:1px solid #34364a;"
+        "transition:border-color .15s,box-shadow .15s}"
+        "form:focus-within{border-color:#7a5cff;"
+        "box-shadow:0 10px 44px rgba(122,92,255,.28)}"
+        "input[type=search]{flex:1;padding:16px 20px;font-size:16px;border:0;"
+        "outline:none;background:#1c1d25;color:#f0f0f0}"
+        "input[type=search]::placeholder{color:#8a8d99}"
+        "button{padding:16px 26px;border:0;background:#7a5cff;color:#fff;"
+        "font-size:15px;font-weight:600;cursor:pointer;transition:background .15s}"
         "button:hover{background:#8d73ff}"
-        ".hint{margin-top:22px;font-size:12.5px;color:#5c5f6a}"
+        ".tiles{display:flex;gap:12px;justify-content:center;margin-top:26px;"
+        "flex-wrap:wrap}"
+        ".tile{display:flex;flex-direction:column;align-items:center;gap:7px;"
+        "width:84px;padding:14px 8px;border-radius:12px;text-decoration:none;"
+        "color:#c9cbd6;background:#1c1d25;border:1px solid #2a2c38;"
+        "font-size:12.5px;transition:background .15s,border-color .15s,transform .1s}"
+        ".tile:hover{background:#24262f;border-color:#3a3d4e;transform:translateY(-2px)}"
+        ".tile .ic{font-size:22px}"
+        ".hint{margin-top:30px;font-size:12.5px;color:#5c5f6a}"
         "</style></head><body><div class=\"wrap\">"
         "<h1>Open<span class=\"nyx\">Nyx</span></h1>"
+        "<p class=\"tag\">Private by default</p>"
         "<form action=\"https://search.brave.com/search\" method=\"get\">"
-        "<input type=\"search\" name=\"q\" placeholder=\"Search the web "
-        "privately…\" autofocus autocomplete=\"off\">"
+        "<input type=\"search\" name=\"q\" placeholder=\"Search with Brave "
+        "or enter address\" autofocus autocomplete=\"off\">"
         "<button type=\"submit\">Search</button></form>"
-        "<div class=\"hint\">Private by default · powered by Brave Search · "
-        "no Google services</div>"
+        "<div class=\"tiles\">"
+        "<a class=\"tile\" href=\"https://search.brave.com/\">"
+        "<span class=\"ic\">🔍</span>Brave</a>"
+        "<a class=\"tile\" href=\"https://en.wikipedia.org/\">"
+        "<span class=\"ic\">📚</span>Wikipedia</a>"
+        "<a class=\"tile\" href=\"https://github.com/\">"
+        "<span class=\"ic\">🐙</span>GitHub</a>"
+        "<a class=\"tile\" href=\"https://news.ycombinator.com/\">"
+        "<span class=\"ic\">📰</span>HN</a>"
+        "<a class=\"tile\" href=\"https://www.openstreetmap.org/\">"
+        "<span class=\"ic\">🗺️</span>Maps</a>"
+        "</div>"
+        "<div class=\"hint\">powered by Brave Search · no Google services</div>"
         "</div></body></html>";
     url = GetDataURI(kHtml, "text/html");
   }
@@ -236,8 +281,15 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
   window_->SetTitle("OpenNyx");
   window_->SetBackgroundColor(kColorWindowBg);
 
+  // Override theme colors (address-bar text/background etc.) before building
+  // the UI so children pick them up on first layout.
+  ApplyTheme();
+
   BuildUI();
   AddAccelerators();
+
+  // Push the theme colors into the freshly-built view hierarchy.
+  window_->ThemeChanged();
 
   // First tab.
   CreateTab(pending_initial_url_, /*select=*/true);
@@ -258,6 +310,7 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   back_button_ = nullptr;
   forward_button_ = nullptr;
   reload_button_ = nullptr;
+  home_button_ = nullptr;
   new_tab_button_ = nullptr;
   address_bar_ = nullptr;
   tabs_.clear();
@@ -420,6 +473,12 @@ void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
         browser->Reload();
       }
       return;
+    case ID_HOME_BUTTON:
+      if (browser) {
+        browser->GetMainFrame()->LoadURL(GetNewTabURL());
+        FocusAddressBar();
+      }
+      return;
     case ID_NEW_TAB_BUTTON:
       CreateTab(GetNewTabURL(), /*select=*/true);
       return;
@@ -536,22 +595,27 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
   tab.tab_button->SetInkDropEnabled(true);
   tab.tab_button->SetFocusable(false);
   tab.tab_button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
-  tab.tab_button->SetMinimumSize(CefSize(120, 30));
-  tab.tab_button->SetMaximumSize(CefSize(220, 30));
+  tab.tab_button->SetMinimumSize(CefSize(130, 32));
+  tab.tab_button->SetMaximumSize(CefSize(220, 32));
 
   // Tab close button.
   tab.close_button = CefLabelButton::CreateLabelButton(this, "×");
   tab.close_button->SetID(ID_TAB_FIRST + tab.id * 2 + 1);
-  tab.close_button->SetFontList(kTabFontList);
+  tab.close_button->SetFontList("Segoe UI, 14px");
   tab.close_button->SetInkDropEnabled(true);
   tab.close_button->SetFocusable(false);
-  tab.close_button->SetMinimumSize(CefSize(26, 30));
-  tab.close_button->SetMaximumSize(CefSize(26, 30));
+  tab.close_button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+  tab.close_button->SetMinimumSize(CefSize(26, 32));
+  tab.close_button->SetMaximumSize(CefSize(26, 32));
+  tab.close_button->SetTooltipText("Close tab (Ctrl+W)");
+  tab.close_button->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorText);
 
   // Panel grouping title + close button.
   tab.tab_panel = CefPanel::CreatePanel(nullptr);
   CefBoxLayoutSettings panel_layout;
   panel_layout.horizontal = true;
+  panel_layout.inside_border_horizontal_spacing = 6;
+  panel_layout.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
   tab.tab_panel->SetToBoxLayout(panel_layout);
   tab.tab_panel->AddChildView(tab.tab_button);
   tab.tab_panel->AddChildView(tab.close_button);
@@ -668,6 +732,50 @@ void BrowserWindow::SelectNextTab(bool forward) {
 
 // ---- Internal helpers ----
 
+void BrowserWindow::ApplyTheme() {
+  if (!window_) {
+    return;
+  }
+  // Address bar / textfield colors. In CEF 150 the per-Textfield color setters
+  // (SetTextColor/SetSelectionBackgroundColor/SetPlaceholderTextColor) are
+  // gated behind CEF_API_REMOVED(15000) and are compiled out at the default
+  // (experimental) API version this project builds against. The supported way
+  // to color textfields is to override the standard theme color IDs on the
+  // Window; every Textfield in the hierarchy then picks them up on
+  // OnThemeChanged. This is what makes the address bar readable (light text on
+  // a lighter-than-window input background) instead of black-on-black.
+  window_->SetThemeColor(CEF_ColorTextfieldBackground, kColorFieldBg);
+  window_->SetThemeColor(CEF_ColorTextfieldForeground, kColorFieldText);
+  window_->SetThemeColor(CEF_ColorTextfieldForegroundPlaceholder,
+                         kColorFieldPlaceholder);
+  window_->SetThemeColor(CEF_ColorTextfieldSelectionBackground,
+                         kColorFieldSelectionBg);
+  window_->SetThemeColor(CEF_ColorTextfieldSelectionForeground,
+                         kColorFieldSelectionText);
+  window_->SetThemeColor(CEF_ColorTextfieldOutline, kColorFieldOutline);
+  window_->SetThemeColor(CEF_ColorTextfieldFilledUnderline, kColorFieldOutline);
+  window_->SetThemeColor(CEF_ColorTextfieldFilledUnderlineFocused,
+                         kColorFieldOutlineFocused);
+
+  // Primary background/foreground so any theme-driven surfaces stay dark.
+  window_->SetThemeColor(CEF_ColorPrimaryBackground, kColorWindowBg);
+  window_->SetThemeColor(CEF_ColorPrimaryForeground, kColorText);
+
+  // Text selection inside the field area.
+  window_->SetThemeColor(CEF_ColorTextSelectionBackground,
+                         kColorFieldSelectionBg);
+  window_->SetThemeColor(CEF_ColorTextSelectionForeground,
+                         kColorFieldSelectionText);
+}
+
+void BrowserWindow::OnThemeColorsChanged(CefRefPtr<CefWindow> window,
+                                         bool chrome_theme) {
+  CEF_REQUIRE_UI_THREAD();
+  // The OS/Chrome theme changed and reset our overrides — re-apply them.
+  // OnThemeChanged notifications are triggered automatically afterwards.
+  ApplyTheme();
+}
+
 void BrowserWindow::BuildUI() {
   // Vertical box layout: [tab strip][toolbar][browser views...].
   CefBoxLayoutSettings window_layout;
@@ -677,22 +785,24 @@ void BrowserWindow::BuildUI() {
   // -- Tab strip --
   tab_strip_ = CefPanel::CreatePanel(nullptr);
   tab_strip_->SetID(ID_TAB_STRIP);
-  tab_strip_->SetBackgroundColor(kColorWindowBg);
+  tab_strip_->SetBackgroundColor(kColorTabStripBg);
   CefBoxLayoutSettings strip_layout;
   strip_layout.horizontal = true;
-  strip_layout.between_child_spacing = 2;
-  strip_layout.inside_border_horizontal_spacing = 4;
-  strip_layout.inside_border_vertical_spacing = 3;
+  strip_layout.between_child_spacing = 3;
+  strip_layout.inside_border_horizontal_spacing = 6;
+  strip_layout.inside_border_vertical_spacing = 4;
   strip_layout.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
   tab_strip_->SetToBoxLayout(strip_layout);
 
   new_tab_button_ = CefLabelButton::CreateLabelButton(this, "+");
   new_tab_button_->SetID(ID_NEW_TAB_BUTTON);
-  new_tab_button_->SetFontList(kFontList);
+  new_tab_button_->SetFontList("Segoe UI, 16px");
   new_tab_button_->SetInkDropEnabled(true);
   new_tab_button_->SetFocusable(false);
-  new_tab_button_->SetMinimumSize(CefSize(30, 30));
-  new_tab_button_->SetMaximumSize(CefSize(30, 30));
+  new_tab_button_->SetMinimumSize(CefSize(32, 30));
+  new_tab_button_->SetMaximumSize(CefSize(32, 30));
+  new_tab_button_->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorTextDim);
+  new_tab_button_->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorText);
   new_tab_button_->SetTooltipText("New tab (Ctrl+T)");
   tab_strip_->AddChildView(new_tab_button_);
 
@@ -713,11 +823,16 @@ void BrowserWindow::BuildUI() {
     CefRefPtr<CefLabelButton> button =
         CefLabelButton::CreateLabelButton(this, label);
     button->SetID(id);
-    button->SetFontList(kFontList);
+    button->SetFontList("Segoe UI, 15px");
     button->SetInkDropEnabled(true);
     button->SetFocusable(false);
-    button->SetMinimumSize(CefSize(32, 30));
-    button->SetMaximumSize(CefSize(32, 30));
+    button->SetMinimumSize(CefSize(34, 30));
+    button->SetMaximumSize(CefSize(34, 30));
+    button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+    button->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorText);
+    button->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorText);
+    button->SetTextColor(CEF_BUTTON_STATE_PRESSED, kColorAccent);
+    button->SetTextColor(CEF_BUTTON_STATE_DISABLED, kColorButtonDisabled);
     button->SetTooltipText(tooltip);
     return button;
   };
@@ -728,18 +843,21 @@ void BrowserWindow::BuildUI() {
       make_nav_button("→", ID_FORWARD_BUTTON, "Forward (Alt+Right)");
   forward_button_->SetEnabled(false);
   reload_button_ = make_nav_button("⟳", ID_RELOAD_BUTTON, "Reload (Ctrl+R)");
+  home_button_ = make_nav_button("⌂", ID_HOME_BUTTON, "New-tab page");
 
   address_bar_ = CefTextfield::CreateTextfield(this);
   address_bar_->SetID(ID_ADDRESS_BAR);
   address_bar_->SetFontList(kFontList);
-  // Note: SetTextColor/SetPlaceholderTextColor/SetSelectionBackgroundColor
-  // were removed in CEF API 15000; textfield colors now follow the theme.
-  address_bar_->SetBackgroundColor(kColorFieldBg);
+  // Text/background/selection/placeholder colors are supplied by the window
+  // theme (see ApplyTheme). A comfortable min height gives the field a
+  // rounded, roomy feel next to the nav buttons.
   address_bar_->SetPlaceholderText("Search with Brave or enter address");
+  address_bar_->SetAccessibleName("Address and search bar");
 
   toolbar_->AddChildView(back_button_);
   toolbar_->AddChildView(forward_button_);
   toolbar_->AddChildView(reload_button_);
+  toolbar_->AddChildView(home_button_);
   toolbar_->AddChildView(address_bar_);
   tb_layout->SetFlexForView(address_bar_, 1);
 
@@ -794,10 +912,13 @@ void BrowserWindow::UpdateTabStrip() {
     const bool active = (i == active_tab_);
     const cef_color_t bg = active ? kColorTabActive : kColorTabInactive;
     tabs_[i].tab_panel->SetBackgroundColor(bg);
+    // Active tab: bright text; inactive: dimmed but brightens on hover.
     tabs_[i].tab_button->SetTextColor(CEF_BUTTON_STATE_NORMAL,
                                       active ? kColorText : kColorTextDim);
+    tabs_[i].tab_button->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorText);
     tabs_[i].close_button->SetTextColor(CEF_BUTTON_STATE_NORMAL,
-                                        active ? kColorText : kColorTextDim);
+                                        active ? kColorTextDim : kColorTextDim);
+    tabs_[i].close_button->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorText);
   }
 }
 

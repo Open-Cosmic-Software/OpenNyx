@@ -62,6 +62,8 @@ class BrowserWindow : public CefWindowDelegate,
   // ---- CefWindowDelegate ----
   void OnWindowCreated(CefRefPtr<CefWindow> window) override;
   void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
+  void OnThemeColorsChanged(CefRefPtr<CefWindow> window,
+                            bool chrome_theme) override;
   bool CanClose(CefRefPtr<CefWindow> window) override;
   CefSize GetPreferredSize(CefRefPtr<CefView> view) override;
   CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
@@ -95,6 +97,9 @@ class BrowserWindow : public CefWindowDelegate,
 
   // Builds the tab strip + toolbar and attaches everything to |window_|.
   void BuildUI();
+  // Overrides the CEF/Chromium theme colors used by our views (notably the
+  // address-bar textfield) so text is readable in our custom dark theme.
+  void ApplyTheme();
   void AddAccelerators();
   void SetWindowIconFromDisk();
 
@@ -114,6 +119,7 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefLabelButton> back_button_;
   CefRefPtr<CefLabelButton> forward_button_;
   CefRefPtr<CefLabelButton> reload_button_;
+  CefRefPtr<CefLabelButton> home_button_;
   CefRefPtr<CefLabelButton> new_tab_button_;
   CefRefPtr<CefTextfield> address_bar_;
 
