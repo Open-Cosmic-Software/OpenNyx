@@ -375,37 +375,21 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
 
 bool BrowserWindow::CanClose(CefRefPtr<CefWindow> window) {
   CEF_REQUIRE_UI_THREAD();
-  // This is only reached when the WHOLE window is being closed -- e.g. the user
-  // hits the OS title-bar ×, or MaybeCloseWindow() runs window_->Close() after
-  // the last tab is gone. It must NOT be the mechanism a single-tab close
-  // relies on (that is handled entirely by CloseTabAt -> OnBrowserClosed).
+  // Reached when the WHOLE window is closing: the OS title-bar ×, or
+  // MaybeCloseWindow() after the last tab was closed. A single-tab × NEVER
+  // routes here (CloseTabAt detaches the view instead of calling
+  // CloseBrowser, so CEF never asks the shared window to close).
   //
-  // If there are still live tab browsers, refuse the close and instead request
-  // each of them to close asynchronously. As each one finishes, OnBrowserClosed
-  // removes its tab; when the last tab is gone, MaybeCloseWindow() issues the
-  // real window_->Close(), which lands back here with tabs_ empty -> allowed.
-  // This mirrors the cefclient Views multi-browser teardown.
-  if (tabs_.empty()) {
-    return true;
+  // Detach every remaining tab and release our references. Each release
+  // triggers ~CefBrowserViewImpl -> WindowDestroyed() -> forced destruction
+  // of that browser only (see CloseTabAt for details). OnBeforeClose fires
+  // per browser; OpenNyxClient quits the app once browser_list_ is empty.
+  // Then let the window close now -- the views were already detached, so the
+  // window teardown no longer touches any live browser.
+  while (!tabs_.empty()) {
+    RemoveTabAt(tabs_.size() - 1);
   }
-  // Iterate over a copy of the browsers: CloseBrowser may re-enter.
-  std::vector<CefRefPtr<CefBrowser>> browsers;
-  browsers.reserve(tabs_.size());
-  for (auto& tab : tabs_) {
-    if (CefRefPtr<CefBrowser> browser = tab.browser_view->GetBrowser()) {
-      if (!tab.closing) {
-        tab.closing = true;
-        browsers.push_back(browser);
-      }
-    }
-  }
-  for (const auto& browser : browsers) {
-    // force_close=false: honor beforeunload. DoClose returns false, so the
-    // async close proceeds and OnBeforeClose -> OnBrowserClosed fires per tab.
-    browser->GetHost()->CloseBrowser(/*force_close=*/false);
-  }
-  // Not yet -- keep the window alive until every browser has actually closed.
-  return false;
+  return true;
 }
 
 CefSize BrowserWindow::GetPreferredSize(CefRefPtr<CefView> view) {
@@ -652,25 +636,34 @@ void BrowserWindow::OnBrowserLoadingStateChange(CefRefPtr<CefBrowser> browser,
 
 bool BrowserWindow::OnBrowserClosed(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
-  // This runs from CefLifeSpanHandler::OnBeforeClose, i.e. AFTER a browser has
-  // actually finished closing. It is the *single authority* that removes a tab
-  // from the UI. Whether the close was triggered by the × button, Ctrl+W, or a
-  // full-window close, the bookkeeping is identical and happens exactly here --
-  // never speculatively in CloseTabAt(). This is what keeps a single-tab close
-  // from tearing down the whole window.
+  // Runs from CefLifeSpanHandler::OnBeforeClose. With the detach-based close
+  // flow the tab was already removed (RemoveTabAt) BEFORE its browser was
+  // destroyed, so this is normally a no-op. It only acts as a safety net for
+  // a browser that somehow died while its tab was still in the strip (e.g.
+  // renderer-initiated teardown we did not see) -- in that case remove the
+  // stale tab and, if it was the last one, close the window.
   const int index = FindTabIndex(CefBrowserView::GetForBrowser(browser));
   if (index < 0) {
-    // Not one of our tabs (e.g. already removed) -> nothing to do.
     return false;
   }
   RemoveTabAt(static_cast<size_t>(index));
-
-  // Only when the very last tab's browser is gone do we close the top-level
-  // window -- and MaybeCloseWindow() makes sure that happens at most once.
   if (tabs_.empty()) {
     MaybeCloseWindow();
   }
   return true;
+}
+
+bool BrowserWindow::HasTabForBrowser(CefRefPtr<CefBrowser> browser) {
+  CEF_REQUIRE_UI_THREAD();
+  return FindTabIndex(CefBrowserView::GetForBrowser(browser)) >= 0;
+}
+
+void BrowserWindow::CloseTabForBrowser(CefRefPtr<CefBrowser> browser) {
+  CEF_REQUIRE_UI_THREAD();
+  const int index = FindTabIndex(CefBrowserView::GetForBrowser(browser));
+  if (index >= 0) {
+    CloseTabAt(static_cast<size_t>(index));
+  }
 }
 
 // ---- Tab management ----
@@ -760,40 +753,42 @@ void BrowserWindow::CloseTabAt(size_t index) {
     return;
   }
 
-  // Closing ONE tab must be a purely asynchronous, single-browser operation.
-  // We do NOT remove the tab, detach its CefBrowserView, or touch the window
-  // here -- doing any of that synchronously (the previous "detach then
-  // force-close" scheme) is exactly what made a single × click cascade into a
-  // full-window teardown.
+  // Multiple CefBrowserViews share ONE CefWindow here. CEF has no supported
+  // way to close such a browser via CloseBrowser()/TryCloseBrowser(): with a
+  // still-attached view, DoClose() returning false makes CEF call
+  // CloseHostWindow() -> widget->Close() on the SHARED top-level window (the
+  // whole-window teardown of v2, or the CanClose deadlock of v3). See CEF
+  // issue #3376 (open) and libcef/browser/alloy/alloy_browser_host_impl.cc.
   //
-  // Instead we just ask THIS browser to close. The CEF lifecycle then runs:
-  //   CloseBrowser(false)
-  //     -> CefLifeSpanHandler::DoClose()      (returns false -> allow)
-  //     -> ... renderer teardown ...
-  //     -> CefLifeSpanHandler::OnBeforeClose()
-  //         -> BrowserWindow::OnBrowserClosed()  (the ONLY place the tab and
-  //            its view are removed; closes the window only if it was the last
-  //            tab).
-  // Nothing else routes to CefWindowDelegate::CanClose(), so the other tabs
-  // and the window stay alive.
-  Tab& tab = tabs_[index];
-  if (tab.closing) {
-    // A close is already in flight for this tab (e.g. double click) -- ignore.
+  // The one sanctioned path (verified against CEF 150 sources) is Views-
+  // hierarchy teardown:
+  //   1. Remove the CefBrowserView from the window. While attached, the
+  //      views::View held the reference to the CefBrowserView (view_util
+  //      PassOwnership); on removal that reference is released, so our Tab
+  //      struct now holds the LAST strong reference (the browser-side
+  //      platform delegate only keeps a WeakPtr).
+  //   2. Release that last reference. ~CefBrowserViewImpl handles exactly
+  //      this case ("BrowserView was removed from the Views hierarchy prior
+  //      to tear-down and the last BrowserView reference was released") by
+  //      calling browser->WindowDestroyed(), which sets window_destroyed_ and
+  //      force-closes ONLY this browser -- CloseContents() then skips both
+  //      DoClose() and CloseHostWindow() and destroys the browser directly.
+  //   3. OnBeforeClose() fires -> OnBrowserClosed() finds no tab (already
+  //      removed) -> no-op; OpenNyxClient drops it from browser_list_ and
+  //      quits the app when the last browser everywhere is gone.
+  //
+  // RemoveTabAt() performs step 1 and -- because its local Tab copy goes out
+  // of scope -- step 2. The window and all other tabs are never touched.
+  //
+  // Closing the LAST tab is instead routed through the window close itself:
+  // window_->Close() -> CanClose() detaches the remaining tab and allows the
+  // close. This keeps the ordering sane (window teardown starts before the
+  // last browser is destroyed and CefQuitMessageLoop() fires).
+  if (tabs_.size() == 1) {
+    MaybeCloseWindow();
     return;
   }
-  CefRefPtr<CefBrowser> browser = tab.browser_view->GetBrowser();
-  if (!browser) {
-    // No live browser yet -> just drop the tab directly.
-    RemoveTabAt(index);
-    if (tabs_.empty()) {
-      MaybeCloseWindow();
-    }
-    return;
-  }
-  tab.closing = true;
-  // force_close=false lets any beforeunload handler run; DoClose() returns
-  // false so the close is not cancelled.
-  browser->GetHost()->CloseBrowser(/*force_close=*/false);
+  RemoveTabAt(index);
 }
 
 void BrowserWindow::MaybeCloseWindow() {
@@ -801,7 +796,8 @@ void BrowserWindow::MaybeCloseWindow() {
     return;
   }
   window_close_issued_ = true;
-  // tabs_ is empty here, so CanClose() will immediately return true.
+  // CanClose() detaches any remaining tabs (destroying their browsers) and
+  // then allows the close.
   window_->Close();
 }
 

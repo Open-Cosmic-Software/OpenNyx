@@ -2,29 +2,53 @@
 
 _Last updated: 2026-07-19 (M3 + M4 + Alloy runtime-style fix + custom-scheme render-process fix + single-tab-close regression fix)_
 
-## Tab close (regression fix, 2026-07-19)
+## Tab close (final flow, 2026-07-19 v4 — detach-based)
 
-A prior fix used a "detach the CefBrowserView from the window, THEN
-CloseBrowser(force_close=true)" scheme inside `CloseTabAt()`. On Windows this
-made closing ONE tab tear down the ENTIRE window (all tabs / the app quit).
+This ping-ponged three times. The definitive finding, verified against the
+actual CEF 150 sources (`alloy_browser_host_impl.cc`, `browser_view_impl.cc`,
+`view_util.cc`) and CEF issue #3376 (still open): **CEF has NO supported way
+to close one of several CefBrowserViews sharing a single CefWindow via
+`CloseBrowser()`/`TryCloseBrowser()`.**
 
-**Root cause:** synchronously `RemoveChildView`-ing a live, visible
-CefBrowserView and force-closing its browser while other BrowserViews share the
-same CefWindow cascades the widget destruction up into the top-level window.
-The hand-rolled ordering was fighting CEF's async close lifecycle.
+Why each earlier attempt failed:
+- **v1** `TryCloseBrowser()` on an attached browser → `DoClose` false → CEF
+  calls `CloseHostWindow()` = `widget->Close()` on the SHARED top-level
+  window → our `CanClose()` cancels it → nothing ever closes.
+- **v2** detach the view, then `CloseBrowser(true)` → at that point our Tab
+  still held a live ref, so `window_destroyed_` was false → CEF again routed
+  to `CloseHostWindow()` → whole window died.
+- **v3** plain `CloseBrowser(false)` → same `CloseHostWindow()` routing →
+  `CanClose()` (tabs non-empty) cancels → tab won't close at all.
 
-**Fix (cefclient Views multi-browser pattern):** the tab close is now purely
-asynchronous and single-authority.
-- `CloseTabAt(i)` only calls `browser->GetHost()->CloseBrowser(false)` on THAT
-  one browser (marks the tab `closing`). It does NOT remove the tab, detach the
-  view, or touch the window.
-- `DoClose()` returns false (allow). `OnBeforeClose` -> `OnBrowserClosed()` is
-  the ONLY place a tab + its view are removed, and it closes the top-level
-  window (once, guarded by `window_close_issued_`) only when the LAST tab is
-  gone.
-- `CanClose()` is now only for a whole-window close (OS × / last-tab): it
-  requests-close every remaining browser and returns false until they are all
-  gone, then allows the close. A single-tab close never depends on it.
+**The one sanctioned path is Views-hierarchy teardown** (the case explicitly
+handled in `~CefBrowserViewImpl`):
+1. `CloseTabAt(i)` (non-last tab): `RemoveTabAt(i)` detaches the
+   CefBrowserView from the window. Detaching makes the views::View release
+   its ref (`view_util::ResumeOwnership`), so our Tab struct holds the LAST
+   strong ref (the browser-side platform delegate only keeps a WeakPtr).
+   When RemoveTabAt's local Tab copy goes out of scope, `~CefBrowserViewImpl`
+   runs → `browser->WindowDestroyed()` → sets `window_destroyed_` → internal
+   `CloseBrowser(true)` → `CloseContents()` now skips BOTH `DoClose()` and
+   `CloseHostWindow()` and destroys ONLY this browser → `OnBeforeClose`.
+   No `CloseBrowser()` call from us, ever, for a tab.
+2. `OnBrowserClosed()` (from `OnBeforeClose`) is a no-op safety net: the tab
+   is already gone. `OpenNyxClient` erases the browser from `browser_list_`
+   and calls `CefQuitMessageLoop()` when the last browser (incl. popups) is
+   gone.
+3. Closing the LAST tab: `CloseTabAt` calls `MaybeCloseWindow()` (guarded by
+   `window_close_issued_`) → `window_->Close()` → `CanClose()`.
+4. `CanClose()` (OS × or last-tab): synchronously detaches ALL remaining tabs
+   via `RemoveTabAt` (each release destroys exactly that browser as in step
+   1) and returns true — the window teardown then touches no live browser.
+5. JS `window.close()`: `DoClose()` returns **true** for tab browsers (the
+   documented "non-standard close" path — returning false would close the
+   shared window) and posts `CloseTabForBrowser()` which routes into the same
+   `CloseTabAt` flow. Popup/DevTools windows keep the standard `DoClose`
+   false flow (one browser per window).
+
+Behavior: × on a background tab removes only it; × on the active tab
+reselects a neighbor; × on the last tab (or the OS ×) closes the window and
+exits the app.
 
 ## Current state: M3 (everyday features) + M4 (privacy layer)
 
@@ -35,7 +59,7 @@ M3/M4 features below. See the Actions tab for the latest run.
 |---|---|
 | Windows x64 CI build (`OpenNyx-win64` artifact) | ✅ green |
 | Custom Views UI (tab strip, toolbar, address bar) | ✅ |
-| Single-tab close (× / Ctrl+W closes ONE tab, not the window) | ✅ fixed 2026-07-19 |
+| Single-tab close (× / Ctrl+W closes ONE tab, not the window) | ✅ fixed 2026-07-19 (v4 detach-based flow) |
 | `opennyx://` privileged scheme (pages + JSON bridge) | ✅ |
 | **History** (record + `opennyx://history` list/search/clear) | ✅ |
 | **Bookmarks** (star button + `opennyx://bookmarks`) | ✅ |

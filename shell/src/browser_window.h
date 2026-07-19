@@ -70,6 +70,10 @@ class BrowserWindow : public CefWindowDelegate,
   void CloseActiveTab();
   void SelectTab(size_t index);
   void SelectNextTab(bool forward);
+  // True if |browser| is hosted by one of this window's tabs.
+  bool HasTabForBrowser(CefRefPtr<CefBrowser> browser);
+  // Closes the tab hosting |browser| (used for JS window.close()).
+  void CloseTabForBrowser(CefRefPtr<CefBrowser> browser);
 
   // ---- CefWindowDelegate ----
   void OnWindowCreated(CefRefPtr<CefWindow> window) override;
@@ -117,10 +121,6 @@ class BrowserWindow : public CefWindowDelegate,
     CefRefPtr<CefLabelButton> close_button;
     std::string title;
     int id = 0;  // Unique tab id (basis for view ids).
-    // True once CloseBrowser() has been kicked off for this tab, so a rapid
-    // second × click / Ctrl+W does not request a second close of the same
-    // browser. The tab is only removed later, in OnBrowserClosed().
-    bool closing = false;
   };
 
   // Builds the tab strip + toolbar and attaches everything to |window_|.

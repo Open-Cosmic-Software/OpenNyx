@@ -210,7 +210,32 @@ void OpenNyxClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
 bool OpenNyxClient::DoClose(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
 
-  // Allow the close to proceed. Cleanup happens in OnBeforeClose().
+  // Tab browsers are closed by DETACHING their CefBrowserView from the shared
+  // window and releasing the last reference (see BrowserWindow::CloseTabAt).
+  // On that path CEF never calls DoClose (window_destroyed_ is already true).
+  //
+  // DoClose *is* reached when the renderer itself initiates a close, e.g. JS
+  // window.close(). Returning false here would make CEF close the browser's
+  // host window -- which for a tab is the SHARED top-level window (all tabs
+  // would die). Instead take the documented "non-standard close" path: return
+  // true and complete the close ourselves by closing just that tab.
+  if (BrowserWindow* window = BrowserWindow::Get()) {
+    if (window->HasTabForBrowser(browser)) {
+      // Post (not inline): DoClose runs inside CloseContents; mutating the
+      // view hierarchy and destroying the browser re-entrantly is unsafe.
+      CefPostTask(TID_UI,
+                  base::BindOnce(
+                      +[](CefRefPtr<CefBrowser> b) {
+                        if (BrowserWindow* w = BrowserWindow::Get()) {
+                          w->CloseTabForBrowser(b);
+                        }
+                      },
+                      browser));
+      return true;
+    }
+  }
+
+  // Popup / DevTools windows: one browser per window, standard close flow.
   return false;
 }
 
