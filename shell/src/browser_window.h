@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "include/cef_browser.h"
+#include "include/internal/cef_types_runtime.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_button_delegate.h"
@@ -76,6 +77,13 @@ class BrowserWindow : public CefWindowDelegate,
   void OnThemeColorsChanged(CefRefPtr<CefWindow> window,
                             bool chrome_theme) override;
   bool CanClose(CefRefPtr<CefWindow> window) override;
+  // Force the Alloy runtime style so CEF renders ONLY the web content inside
+  // each BrowserView (no Chrome toolbar / Google NTP). OpenNyx draws its own
+  // tab strip, toolbar and start page. Without this, CEF 150 defaults to the
+  // Chrome runtime style and shows the full Chrome UI.
+  cef_runtime_style_t GetWindowRuntimeStyle() override {
+    return CEF_RUNTIME_STYLE_ALLOY;
+  }
   CefSize GetPreferredSize(CefRefPtr<CefView> view) override;
   CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
   bool OnAccelerator(CefRefPtr<CefWindow> window, int command_id) override;
@@ -83,6 +91,11 @@ class BrowserWindow : public CefWindowDelegate,
   // ---- CefBrowserViewDelegate ----
   ChromeToolbarType GetChromeToolbarType(
       CefRefPtr<CefBrowserView> browser_view) override;
+  // Force Alloy runtime style for every tab's BrowserView (see the window
+  // delegate override above for rationale).
+  cef_runtime_style_t GetBrowserRuntimeStyle() override {
+    return CEF_RUNTIME_STYLE_ALLOY;
+  }
   bool OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView> browser_view,
                                  CefRefPtr<CefBrowserView> popup_browser_view,
                                  bool is_devtools) override;

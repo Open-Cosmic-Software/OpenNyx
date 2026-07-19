@@ -1,6 +1,6 @@
 # Build Status
 
-_Last updated: 2026-07-19 (M3 + M4)_
+_Last updated: 2026-07-19 (M3 + M4 + Alloy runtime-style fix)_
 
 ## Current state: M3 (everyday features) + M4 (privacy layer)
 
@@ -120,6 +120,22 @@ downloads` page polls `opennyx://api/downloads` for live progress bars.
   header.
 - **`VK_OEM_COMMA` is a Windows macro** — our local constant was renamed to
   `kVK_OEM_COMMA` to avoid the clash (`error C2059`).
+- **CEF 150 defaults to the *Chrome* runtime style.** Without an explicit
+  override, `CefBrowserView` renders the full Chrome browser UI (Chrome
+  toolbar + the Google new-tab page with "Customize Chromium" / AI Mode),
+  bypassing our custom Views UI entirely. **Fix:** force the **Alloy** runtime
+  style so each BrowserView renders *only* web content, letting our own tab
+  strip + toolbar + `opennyx://newtab` start page be the visible UI. We
+  override on the delegate instance used for **both** the browser view and the
+  top-level window (the single `BrowserWindow` object is delegate for both),
+  plus the popup/DevTools window:
+  - `BrowserWindow::GetBrowserRuntimeStyle() -> CEF_RUNTIME_STYLE_ALLOY`
+    (from `CefBrowserViewDelegate`)
+  - `BrowserWindow::GetWindowRuntimeStyle() -> CEF_RUNTIME_STYLE_ALLOY`
+    (from `CefWindowDelegate`)
+  - `PopupWindowDelegate::GetWindowRuntimeStyle() -> CEF_RUNTIME_STYLE_ALLOY`
+  Enum lives in `include/internal/cef_types_runtime.h`. The new-tab URL is our
+  own `opennyx://newtab` (see `GetNewTabURL()`), never Google.
 - Vendored `third_party/json/` is committed (the `.gitignore` now ignores only
   the downloaded CEF distribution, not vendored headers).
 

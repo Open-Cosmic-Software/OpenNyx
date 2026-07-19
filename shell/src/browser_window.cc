@@ -157,6 +157,12 @@ class PopupWindowDelegate : public CefWindowDelegate {
     return CefSize(900, 700);
   }
 
+  // Popups / DevTools also use Alloy style so they match the main window and
+  // never fall back to the Chrome runtime UI.
+  cef_runtime_style_t GetWindowRuntimeStyle() override {
+    return CEF_RUNTIME_STYLE_ALLOY;
+  }
+
  private:
   CefRefPtr<CefBrowserView> browser_view_;
 
