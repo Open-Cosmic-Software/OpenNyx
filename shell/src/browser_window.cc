@@ -883,6 +883,19 @@ void BrowserWindow::SelectTab(size_t index) {
     if (forward_button_) {
       forward_button_->SetEnabled(browser->CanGoForward());
     }
+  } else if (address_bar_) {
+    // A freshly-created tab's CefBrowser is not attached yet, so GetBrowser()
+    // returns null here. Without this branch the address bar would keep the
+    // PREVIOUS tab's URL. A brand-new tab always opens the new-tab page, so
+    // show an empty, inviting address bar. Once the browser attaches,
+    // OnBrowserAddressChange keeps it in sync.
+    address_bar_->SetText("");
+    if (back_button_) {
+      back_button_->SetEnabled(false);
+    }
+    if (forward_button_) {
+      forward_button_->SetEnabled(false);
+    }
   }
 
   if (window_) {
