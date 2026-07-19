@@ -49,9 +49,18 @@ namespace {
 BrowserWindow* g_browser_window = nullptr;
 
 // TEMPORARY tracer for the DevTools crash hunt (mirrors the one in
-// opennyx_client.cc). Remove once fixed.
+// opennyx_client.cc). Writes to %LOCALAPPDATA%\OpenNyx\opennyx-devtools.log.
+// Remove once fixed.
 void DevLog(const std::string& msg) {
-  FILE* f = std::fopen("opennyx-devtools.log", "a");
+  std::string path;
+  if (const char* la = std::getenv("LOCALAPPDATA")) {
+    path = std::string(la) + "\\OpenNyx\\opennyx-devtools.log";
+  } else if (const char* tmp = std::getenv("TEMP")) {
+    path = std::string(tmp) + "\\opennyx-devtools.log";
+  } else {
+    path = "opennyx-devtools.log";
+  }
+  FILE* f = std::fopen(path.c_str(), "a");
   if (f) {
     std::fprintf(f, "%s\n", msg.c_str());
     std::fclose(f);

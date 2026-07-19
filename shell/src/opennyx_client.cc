@@ -211,10 +211,19 @@ namespace {
 // (26500) and MENU_ID_USER_LAST.
 const int kMenuInspectElement = MENU_ID_USER_FIRST + 0;
 
-// TEMPORARY file tracer for the DevTools crash hunt. Writes to
-// opennyx-devtools.log next to the working directory. Remove once fixed.
+// TEMPORARY file tracer for the DevTools crash hunt. Writes to an ABSOLUTE
+// path so it is easy to find: %LOCALAPPDATA%\OpenNyx\opennyx-devtools.log
+// (falls back to %TEMP% then the CWD). Remove once fixed.
 void DevLog(const std::string& msg) {
-  FILE* f = std::fopen("opennyx-devtools.log", "a");
+  std::string path;
+  if (const char* la = std::getenv("LOCALAPPDATA")) {
+    path = std::string(la) + "\\OpenNyx\\opennyx-devtools.log";
+  } else if (const char* tmp = std::getenv("TEMP")) {
+    path = std::string(tmp) + "\\opennyx-devtools.log";
+  } else {
+    path = "opennyx-devtools.log";
+  }
+  FILE* f = std::fopen(path.c_str(), "a");
   if (f) {
     std::fprintf(f, "%s\n", msg.c_str());
     std::fclose(f);
