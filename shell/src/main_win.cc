@@ -41,6 +41,31 @@ int RunMain(HINSTANCE hInstance, int nCmdShow) {
     return exit_code;
   }
 
+  // ---- Single-instance guard (browser process only) ----------------------
+  // Reached ONLY by the real browser-process launch (sub-processes returned
+  // above). A named, per-session mutex lets a second launch detect the first
+  // and hand off instead of spawning its own (bare Chrome) window. This does
+  // not depend on any CEF-internal process singleton (which the Alloy runtime
+  // does not reliably provide).
+  HANDLE singleton = CreateMutexW(nullptr, TRUE, L"OpenNyx_SingleInstance_Mutex");
+  if (singleton && GetLastError() == ERROR_ALREADY_EXISTS) {
+    // Another OpenNyx is already running. Find its top-level window and bring
+    // it to the foreground, then exit before touching CEF.
+    HWND existing = FindWindowW(L"CefWindowClass", nullptr);
+    if (!existing) {
+      existing = FindWindowW(nullptr, L"OpenNyx");
+    }
+    if (existing) {
+      if (IsIconic(existing)) {
+        ShowWindow(existing, SW_RESTORE);
+      }
+      SetForegroundWindow(existing);
+    }
+    ReleaseMutex(singleton);
+    CloseHandle(singleton);
+    return 0;
+  }
+
   // Global CEF settings.
   CefSettings settings;
 
@@ -48,14 +73,9 @@ int RunMain(HINSTANCE hInstance, int nCmdShow) {
   // DLL split). Enabling the sandbox is tracked for M2.
   settings.no_sandbox = true;
 
-  // Persist a single, stable user-data / cache directory. This is REQUIRED for
-  // single-instance behaviour: without a root_cache_path CEF gives each launch
-  // its own temporary profile, and a SECOND launch (while the first is still
-  // running) cannot take the Chrome runtime's process singleton -- it falls
-  // back to spawning a bare Chrome window instead of OpenNyx's own UI. With a
-  // fixed root_cache_path, a second launch instead triggers OnAlreadyRunning()
-  // in the FIRST process (which raises our existing window / opens a new tab)
-  // and the second process exits cleanly.
+  // Persist a single, stable user-data / cache directory so history, cookies,
+  // bookmarks and settings survive restarts. (Single-instance is handled by
+  // the named mutex above, not by this path.)
   // Compute the cache dir with the native API (CefGetPath is not available
   // until after CefInitialize). Prefer %LOCALAPPDATA%\OpenNyx; fall back to
   // the executable directory.
@@ -92,6 +112,11 @@ int RunMain(HINSTANCE hInstance, int nCmdShow) {
 
   // Shut down CEF.
   CefShutdown();
+
+  if (singleton) {
+    ReleaseMutex(singleton);
+    CloseHandle(singleton);
+  }
 
   return 0;
 }
