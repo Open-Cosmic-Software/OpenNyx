@@ -207,6 +207,49 @@ class PopupWindowDelegate : public CefWindowDelegate {
   IMPLEMENT_REFCOUNTING(PopupWindowDelegate);
 };
 
+// Minimal BrowserView delegate for popup / DevTools browser views. The default
+// GetDelegateForPopupBrowserView() returns |this| (the main BrowserWindow),
+// which would then be asked to host the DevTools view with all the main
+// window's tab/toolbar/draggable-region logic -- that crashes. DevTools (and
+// window.open popups) must use their OWN lightweight delegate that only forces
+// the Alloy runtime style and draws no Chrome toolbar.
+class PopupBrowserViewDelegate : public CefBrowserViewDelegate {
+ public:
+  PopupBrowserViewDelegate() = default;
+  PopupBrowserViewDelegate(const PopupBrowserViewDelegate&) = delete;
+  PopupBrowserViewDelegate& operator=(const PopupBrowserViewDelegate&) = delete;
+
+  ChromeToolbarType GetChromeToolbarType(
+      CefRefPtr<CefBrowserView> browser_view) override {
+    return CEF_CTT_NONE;
+  }
+
+  cef_runtime_style_t GetBrowserRuntimeStyle() override {
+    return CEF_RUNTIME_STYLE_ALLOY;
+  }
+
+  // Nested popups (e.g. a popup opened from DevTools) keep using a fresh
+  // lightweight delegate, never the main window.
+  CefRefPtr<CefBrowserViewDelegate> GetDelegateForPopupBrowserView(
+      CefRefPtr<CefBrowserView> browser_view,
+      const CefBrowserSettings& settings,
+      CefRefPtr<CefClient> client,
+      bool is_devtools) override {
+    return new PopupBrowserViewDelegate();
+  }
+
+  bool OnPopupBrowserViewCreated(
+      CefRefPtr<CefBrowserView> browser_view,
+      CefRefPtr<CefBrowserView> popup_browser_view,
+      bool is_devtools) override {
+    CefWindow::CreateTopLevelWindow(
+        new PopupWindowDelegate(popup_browser_view));
+    return true;
+  }
+
+  IMPLEMENT_REFCOUNTING(PopupBrowserViewDelegate);
+};
+
 // Decodes the embedded OpenNyx PNG into a CefImage once and caches it.
 CefRefPtr<CefImage> GetAppIconImage() {
   static CefRefPtr<CefImage> image;
@@ -565,6 +608,18 @@ CefBrowserViewDelegate::ChromeToolbarType BrowserWindow::GetChromeToolbarType(
     CefRefPtr<CefBrowserView> browser_view) {
   // OpenNyx draws its own toolbar; no Chrome toolbar inside the browser view.
   return CEF_CTT_NONE;
+}
+
+CefRefPtr<CefBrowserViewDelegate>
+BrowserWindow::GetDelegateForPopupBrowserView(
+    CefRefPtr<CefBrowserView> browser_view,
+    const CefBrowserSettings& settings,
+    CefRefPtr<CefClient> client,
+    bool is_devtools) {
+  // Give popups / DevTools their own lightweight delegate instead of this main
+  // window. Returning |this| (the default) would drive the DevTools view
+  // through the tab-strip/toolbar logic and crash.
+  return new PopupBrowserViewDelegate();
 }
 
 bool BrowserWindow::OnPopupBrowserViewCreated(

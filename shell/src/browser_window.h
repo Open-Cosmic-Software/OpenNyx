@@ -115,6 +115,14 @@ class BrowserWindow : public CefWindowDelegate,
   bool OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView> browser_view,
                                  CefRefPtr<CefBrowserView> popup_browser_view,
                                  bool is_devtools) override;
+  // Popups and DevTools must NOT reuse this main window as their view delegate
+  // (default returns |this|), or the main window's tab/toolbar logic runs for
+  // the DevTools view and crashes. Hand them a lightweight popup delegate.
+  CefRefPtr<CefBrowserViewDelegate> GetDelegateForPopupBrowserView(
+      CefRefPtr<CefBrowserView> browser_view,
+      const CefBrowserSettings& settings,
+      CefRefPtr<CefClient> client,
+      bool is_devtools) override;
 
   // ---- CefViewDelegate ----
   // When the address bar gains focus (e.g. first click), select all its text
