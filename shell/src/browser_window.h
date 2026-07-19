@@ -134,6 +134,9 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefBrowser> ActiveBrowser();
   int FindTabIndex(CefRefPtr<CefBrowserView> view);
   void CloseTabAt(size_t index);
+  // Destroys the tab identified by |tab_id| on a FRESH stack (posted to the UI
+  // thread) so it never runs re-entrantly inside the button click handler.
+  void DestroyTabById(int tab_id);
   void RemoveTabAt(size_t index);
   // Issues the real top-level window close exactly once (idempotent). Called
   // when the last tab's browser has finished closing.

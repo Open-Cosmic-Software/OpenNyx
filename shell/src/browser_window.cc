@@ -22,6 +22,9 @@
 #include "include/base/cef_callback.h"
 #include "include/cef_task.h"
 
+#include <cstdio>
+#include <ctime>
+
 #include "blocklist.h"
 #include "opennyx_client.h"
 #include "store.h"
@@ -29,6 +32,28 @@
 namespace {
 
 BrowserWindow* g_browser_window = nullptr;
+
+// Lightweight close-flow tracer. Writes to opennyx-tabclose.log next to the
+// executable so tab-close behaviour is observable on machines we cannot debug
+// interactively. Best-effort; failures are ignored.
+void TabLog(const char* msg, long a = -1, long b = -1) {
+  FILE* f = std::fopen("opennyx-tabclose.log", "a");
+  if (!f) {
+    return;
+  }
+  std::time_t t = std::time(nullptr);
+  char ts[32];
+  std::strftime(ts, sizeof(ts), "%H:%M:%S", std::localtime(&t));
+  std::fprintf(f, "[%s] %s", ts, msg);
+  if (a != -1) {
+    std::fprintf(f, " a=%ld", a);
+  }
+  if (b != -1) {
+    std::fprintf(f, " b=%ld", b);
+  }
+  std::fprintf(f, "\n");
+  std::fclose(f);
+}
 
 // ---- View ids ----
 enum ViewID {
@@ -375,6 +400,7 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
 
 bool BrowserWindow::CanClose(CefRefPtr<CefWindow> window) {
   CEF_REQUIRE_UI_THREAD();
+  TabLog("CanClose", static_cast<long>(tabs_.size()));
   // Reached when the WHOLE window is closing: the OS title-bar ×, or
   // MaybeCloseWindow() after the last tab was closed. A single-tab × NEVER
   // routes here (CloseTabAt detaches the view instead of calling
@@ -643,6 +669,8 @@ bool BrowserWindow::OnBrowserClosed(CefRefPtr<CefBrowser> browser) {
   // renderer-initiated teardown we did not see) -- in that case remove the
   // stale tab and, if it was the last one, close the window.
   const int index = FindTabIndex(CefBrowserView::GetForBrowser(browser));
+  TabLog("OnBrowserClosed", static_cast<long>(index),
+         static_cast<long>(tabs_.size()));
   if (index < 0) {
     return false;
   }
@@ -784,11 +812,41 @@ void BrowserWindow::CloseTabAt(size_t index) {
   // window_->Close() -> CanClose() detaches the remaining tab and allows the
   // close. This keeps the ordering sane (window teardown starts before the
   // last browser is destroyed and CefQuitMessageLoop() fires).
+  //
+  // CRITICAL: destroying a tab MUST NOT happen re-entrantly inside the button
+  // click handler (OnButtonPressed -> CloseTabAt). Tearing a CefBrowserView /
+  // browser down while CEF is still on the click's call stack is what made a
+  // single-tab close cascade into a full-window teardown. So we capture the
+  // tab id now and defer the actual destruction to a fresh UI-thread stack.
+  const int tab_id = tabs_[index].id;
+  TabLog("CloseTabAt: schedule destroy", tab_id, static_cast<long>(tabs_.size()));
+  CefPostTask(TID_UI, base::BindOnce(&BrowserWindow::DestroyTabById, this,
+                                     tab_id));
+}
+
+void BrowserWindow::DestroyTabById(int tab_id) {
+  CEF_REQUIRE_UI_THREAD();
+  // Resolve the id to a current index (indices may have shifted since the
+  // click was posted).
+  size_t index = tabs_.size();
+  for (size_t i = 0; i < tabs_.size(); ++i) {
+    if (tabs_[i].id == tab_id) {
+      index = i;
+      break;
+    }
+  }
+  if (index >= tabs_.size()) {
+    TabLog("DestroyTabById: gone", tab_id);
+    return;
+  }
+  TabLog("DestroyTabById: run", tab_id, static_cast<long>(tabs_.size()));
   if (tabs_.size() == 1) {
+    // Last tab -> close the whole window (on this fresh stack).
     MaybeCloseWindow();
     return;
   }
   RemoveTabAt(index);
+  TabLog("DestroyTabById: done", tab_id, static_cast<long>(tabs_.size()));
 }
 
 void BrowserWindow::MaybeCloseWindow() {
@@ -805,6 +863,8 @@ void BrowserWindow::RemoveTabAt(size_t index) {
   if (index >= tabs_.size() || !window_) {
     return;
   }
+  TabLog("RemoveTabAt", static_cast<long>(index),
+         static_cast<long>(tabs_.size()));
   Tab tab = tabs_[index];
   tabs_.erase(tabs_.begin() + index);
 
