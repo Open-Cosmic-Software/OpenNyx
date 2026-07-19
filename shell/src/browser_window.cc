@@ -189,6 +189,24 @@ CefRefPtr<CefImage> GetAppIconImage() {
 // Free functions
 // ---------------------------------------------------------------------------
 
+// True if |spec| is a URL we should NOT show in the address bar (the new-tab
+// page, blank/initial states). Kept in one place so every code path agrees.
+bool ShouldHideUrlInAddressBar(const std::string& spec) {
+  if (spec.empty()) {
+    return true;
+  }
+  if (spec == "about:blank" || spec == "about:newtab") {
+    return true;
+  }
+  if (spec.compare(0, 5, "data:") == 0) {
+    return true;
+  }
+  if (spec == "opennyx://newtab" || spec == "opennyx://newtab/") {
+    return true;
+  }
+  return false;
+}
+
 std::string GetNewTabURL() {
   // The new-tab / homepage is now served by the privileged opennyx:// scheme
   // (see scheme_handler.cc / pages.cc), which allows rich, interactive pages
@@ -606,12 +624,7 @@ void BrowserWindow::OnBrowserAddressChange(CefRefPtr<CefBrowser> browser,
   // Don't clobber the user's typing.
   if (address_bar_ && !address_bar_->HasFocus()) {
     const std::string spec = url.ToString();
-    // Hide the noisy data: URL of the legacy new-tab page and our own
-    // opennyx://newtab homepage (show an empty, inviting address bar).
-    const bool hide = spec.compare(0, 5, "data:") == 0 ||
-                      spec == "opennyx://newtab" ||
-                      spec == "opennyx://newtab/";
-    address_bar_->SetText(hide ? "" : spec);
+    address_bar_->SetText(ShouldHideUrlInAddressBar(spec) ? "" : spec);
   }
   UpdateChrome();
 }
@@ -736,6 +749,14 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
 
   if (select) {
     SelectTab(tabs_.size() - 1);
+    // A brand-new tab always opens the new-tab page. Clear the address bar
+    // immediately and unconditionally: at this point the new browser may not
+    // be attached yet (GetBrowser() null) or may briefly report about:blank,
+    // either of which would otherwise leave the PREVIOUS tab's URL visible.
+    // OnBrowserAddressChange will fill in a real URL once the user navigates.
+    if (address_bar_ && !address_bar_->HasFocus()) {
+      address_bar_->SetText("");
+    }
   } else {
     browser_view->SetVisible(false);
     UpdateTabStrip();
@@ -872,10 +893,7 @@ void BrowserWindow::SelectTab(size_t index) {
     // new tab's URL, even if the address bar happened to hold focus.)
     if (address_bar_) {
       const std::string url = browser->GetMainFrame()->GetURL().ToString();
-      const bool hide = url.compare(0, 5, "data:") == 0 ||
-                        url == "opennyx://newtab" ||
-                        url == "opennyx://newtab/";
-      address_bar_->SetText(hide ? "" : url);
+      address_bar_->SetText(ShouldHideUrlInAddressBar(url) ? "" : url);
     }
     if (back_button_) {
       back_button_->SetEnabled(browser->CanGoBack());
