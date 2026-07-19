@@ -104,6 +104,11 @@ class BrowserWindow : public CefWindowDelegate,
                                  CefRefPtr<CefBrowserView> popup_browser_view,
                                  bool is_devtools) override;
 
+  // ---- CefViewDelegate ----
+  // When the address bar gains focus (e.g. first click), select all its text
+  // like every mainstream browser does.
+  void OnFocus(CefRefPtr<CefView> view) override;
+
   // ---- CefTextfieldDelegate ----
   bool OnKeyEvent(CefRefPtr<CefTextfield> textfield,
                   const CefKeyEvent& event) override;

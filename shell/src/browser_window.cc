@@ -867,9 +867,15 @@ void BrowserWindow::SelectTab(size_t index) {
   // Sync toolbar state with the newly active tab.
   CefRefPtr<CefBrowser> browser = tabs_[index].browser_view->GetBrowser();
   if (browser) {
-    if (address_bar_ && !address_bar_->HasFocus()) {
+    // Always sync the address bar to the newly-activated tab. (No HasFocus
+    // guard here: switching tabs is an explicit user action and must show the
+    // new tab's URL, even if the address bar happened to hold focus.)
+    if (address_bar_) {
       const std::string url = browser->GetMainFrame()->GetURL().ToString();
-      address_bar_->SetText(url.compare(0, 5, "data:") == 0 ? "" : url);
+      const bool hide = url.compare(0, 5, "data:") == 0 ||
+                        url == "opennyx://newtab" ||
+                        url == "opennyx://newtab/";
+      address_bar_->SetText(hide ? "" : url);
     }
     if (back_button_) {
       back_button_->SetEnabled(browser->CanGoBack());
@@ -1123,6 +1129,29 @@ void BrowserWindow::FocusAddressBar() {
     address_bar_->RequestFocus();
     address_bar_->SelectAll(false);
   }
+}
+
+void BrowserWindow::OnFocus(CefRefPtr<CefView> view) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!view || view->GetID() != ID_ADDRESS_BAR) {
+    return;
+  }
+  CefRefPtr<CefTextfield> field = view->AsTextfield();
+  if (!field) {
+    return;
+  }
+  // Select the whole URL when the address bar first gains focus, matching
+  // every mainstream browser (one click -> full selection). The selection is
+  // posted to a fresh UI-thread stack: a mouse click that grants focus also
+  // sets the caret on mouse-up, which would clear an immediate SelectAll, so
+  // we run it just after the click settles.
+  CefPostTask(TID_UI, base::BindOnce(
+                          [](CefRefPtr<CefTextfield> f) {
+                            if (f && f->HasFocus() && !f->GetText().empty()) {
+                              f->SelectAll(false);
+                            }
+                          },
+                          field));
 }
 
 void BrowserWindow::NavigateActiveTab(const std::string& input) {
