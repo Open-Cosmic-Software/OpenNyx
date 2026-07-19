@@ -115,9 +115,12 @@ if(OS_WINDOWS)
 
   # Source files contain UTF-8 string literals (button glyphs).
   target_compile_options(${CEF_TARGET} PRIVATE "/utf-8")
-  # nlohmann/json needs a bigger MSVC constexpr step limit for some builds and
-  # exceptions enabled (used for tolerant parsing).
+  # The json header is large; MSVC needs /bigobj for the resulting objects.
   target_compile_options(${CEF_TARGET} PRIVATE "/bigobj")
+  # CEF builds with exceptions + RTTI disabled (_HAS_EXCEPTIONS=0 /GR-). Tell
+  # nlohmann/json to use assert/abort instead of throw so it compiles cleanly
+  # in that mode.
+  target_compile_definitions(${CEF_TARGET} PRIVATE JSON_NOEXCEPTION)
 
   # Embed the application manifests (common controls + supported OS list).
   ADD_WINDOWS_MANIFEST("${CMAKE_CURRENT_SOURCE_DIR}/win" "${CEF_TARGET}" "exe")

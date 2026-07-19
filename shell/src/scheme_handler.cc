@@ -176,22 +176,19 @@ CefRefPtr<CefResourceHandler> HandleApi(const std::string& endpoint,
 
   if (endpoint == "config") {
     if (method == "POST") {
-      try {
-        json j = json::parse(body, nullptr, false);
-        AppConfig c = store->GetConfig();
-        if (j.is_object()) {
-          c.search_engine = j.value("search_engine", c.search_engine);
-          c.custom_search_url = j.value("custom_search_url", c.custom_search_url);
-          c.homepage = j.value("homepage", c.homepage);
-          c.blocking_enabled = j.value("blocking_enabled", c.blocking_enabled);
-          c.doh_enabled = j.value("doh_enabled", c.doh_enabled);
-          c.doh_resolver = j.value("doh_resolver", c.doh_resolver);
-          c.doh_custom_template =
-              j.value("doh_custom_template", c.doh_custom_template);
-        }
+      json j = json::parse(body, nullptr, false);
+      AppConfig c = store->GetConfig();
+      if (j.is_object()) {
+        c.search_engine = j.value("search_engine", c.search_engine);
+        c.custom_search_url = j.value("custom_search_url", c.custom_search_url);
+        c.homepage = j.value("homepage", c.homepage);
+        c.blocking_enabled = j.value("blocking_enabled", c.blocking_enabled);
+        c.doh_enabled = j.value("doh_enabled", c.doh_enabled);
+        c.doh_resolver = j.value("doh_resolver", c.doh_resolver);
+        c.doh_custom_template =
+            j.value("doh_custom_template", c.doh_custom_template);
         store->SetConfig(c);
         OpenNyxBlocklist::Get()->SetEnabled(c.blocking_enabled);
-      } catch (...) {
       }
     }
     AppConfig c = store->GetConfig();
@@ -246,11 +243,10 @@ CefRefPtr<CefResourceHandler> HandleApi(const std::string& endpoint,
   }
 
   if (endpoint == "bookmarks/remove" && method == "POST") {
-    try {
-      json j = json::parse(body, nullptr, false);
+    json j = json::parse(body, nullptr, false);
+    if (j.is_object()) {
       const std::string url = j.value("url", "");
       store->RemoveBookmark(url);
-    } catch (...) {
     }
     return JsonResponse(json{{"ok", true}});
   }

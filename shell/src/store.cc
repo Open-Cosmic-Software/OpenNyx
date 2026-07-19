@@ -125,8 +125,13 @@ void OpenNyxStore::EnsureLoaded() {
 }
 
 void OpenNyxStore::LoadLocked() {
+  // Note: CEF is compiled with exceptions disabled (_HAS_EXCEPTIONS=0), and
+  // this project links against it, so we build with JSON_NOEXCEPTION. All
+  // json::parse calls pass allow_exceptions=false and are checked via
+  // is_discarded()/is_object()/is_array() instead of try/catch.
+
   // ---- config ----
-  try {
+  {
     const std::string raw = ReadFile(PathFor("config.json"));
     if (!raw.empty()) {
       json j = json::parse(raw, nullptr, false);
@@ -143,11 +148,10 @@ void OpenNyxStore::LoadLocked() {
             j.value("doh_custom_template", config_.doh_custom_template);
       }
     }
-  } catch (...) {
   }
 
   // ---- history ----
-  try {
+  {
     const std::string raw = ReadFile(PathFor("history.json"));
     if (!raw.empty()) {
       json j = json::parse(raw, nullptr, false);
@@ -163,11 +167,10 @@ void OpenNyxStore::LoadLocked() {
         }
       }
     }
-  } catch (...) {
   }
 
   // ---- bookmarks ----
-  try {
+  {
     const std::string raw = ReadFile(PathFor("bookmarks.json"));
     if (!raw.empty()) {
       json j = json::parse(raw, nullptr, false);
@@ -183,11 +186,10 @@ void OpenNyxStore::LoadLocked() {
         }
       }
     }
-  } catch (...) {
   }
 
   // ---- downloads ----
-  try {
+  {
     const std::string raw = ReadFile(PathFor("downloads.json"));
     if (!raw.empty()) {
       json j = json::parse(raw, nullptr, false);
@@ -209,7 +211,6 @@ void OpenNyxStore::LoadLocked() {
         }
       }
     }
-  } catch (...) {
   }
 }
 

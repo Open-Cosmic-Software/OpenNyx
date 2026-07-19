@@ -72,7 +72,7 @@ constexpr int kVK_TAB = 0x09;
 constexpr int kVK_F5 = 0x74;
 constexpr int kVK_LEFT = 0x25;
 constexpr int kVK_RIGHT = 0x27;
-constexpr int VK_OEM_COMMA = 0xBC;  // ',' key.
+constexpr int kVK_OEM_COMMA = 0xBC;  // ',' key.
 
 // ---- Dark theme palette ----
 // A cohesive, slightly blue-tinted charcoal theme with a purple accent that
@@ -954,7 +954,7 @@ void BrowserWindow::AddAccelerators() {
   window_->SetAccelerator(CMD_HISTORY, 'H', false, true, false, true);
   window_->SetAccelerator(CMD_BOOKMARK, 'D', false, true, false, true);
   window_->SetAccelerator(CMD_DOWNLOADS, 'J', false, true, false, true);
-  window_->SetAccelerator(CMD_SETTINGS, VK_OEM_COMMA, false, true, false, true);
+  window_->SetAccelerator(CMD_SETTINGS, kVK_OEM_COMMA, false, true, false, true);
 }
 
 CefRefPtr<CefBrowserView> BrowserWindow::ActiveBrowserView() {
