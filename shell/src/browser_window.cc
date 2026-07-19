@@ -48,6 +48,16 @@ namespace {
 
 BrowserWindow* g_browser_window = nullptr;
 
+// TEMPORARY tracer for the DevTools crash hunt (mirrors the one in
+// opennyx_client.cc). Remove once fixed.
+void DevLog(const std::string& msg) {
+  FILE* f = std::fopen("opennyx-devtools.log", "a");
+  if (f) {
+    std::fprintf(f, "%s\n", msg.c_str());
+    std::fclose(f);
+  }
+}
+
 
 // ---- View ids ----
 enum ViewID {
@@ -173,10 +183,16 @@ class PopupWindowDelegate : public CefWindowDelegate {
   PopupWindowDelegate& operator=(const PopupWindowDelegate&) = delete;
 
   void OnWindowCreated(CefRefPtr<CefWindow> window) override {
+    DevLog("D. PopupWindowDelegate::OnWindowCreated");
     window->SetTitle("OpenNyx");
+    DevLog("E. adding child view, view_null=" +
+           std::string(browser_view_ ? "no" : "yes"));
     window->AddChildView(browser_view_);
+    DevLog("F. showing window");
     window->Show();
+    DevLog("G. requesting focus");
     browser_view_->RequestFocus();
+    DevLog("H. popup window fully created");
   }
 
   void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
@@ -616,6 +632,8 @@ BrowserWindow::GetDelegateForPopupBrowserView(
     const CefBrowserSettings& settings,
     CefRefPtr<CefClient> client,
     bool is_devtools) {
+  DevLog(std::string("A. GetDelegateForPopupBrowserView is_devtools=") +
+         (is_devtools ? "yes" : "no"));
   // Give popups / DevTools their own lightweight delegate instead of this main
   // window. Returning |this| (the default) would drive the DevTools view
   // through the tab-strip/toolbar logic and crash.
@@ -626,9 +644,13 @@ bool BrowserWindow::OnPopupBrowserViewCreated(
     CefRefPtr<CefBrowserView> browser_view,
     CefRefPtr<CefBrowserView> popup_browser_view,
     bool is_devtools) {
+  DevLog(std::string("B. OnPopupBrowserViewCreated is_devtools=") +
+         (is_devtools ? "yes" : "no") +
+         " popup_view_null=" + (popup_browser_view ? "no" : "yes"));
   // Host popups (window.open) and DevTools in their own top-level window.
   CefWindow::CreateTopLevelWindow(
       new PopupWindowDelegate(popup_browser_view));
+  DevLog("C. CreateTopLevelWindow returned");
   return true;
 }
 

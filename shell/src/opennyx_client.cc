@@ -210,6 +210,16 @@ namespace {
 // User-defined context-menu command IDs must live between MENU_ID_USER_FIRST
 // (26500) and MENU_ID_USER_LAST.
 const int kMenuInspectElement = MENU_ID_USER_FIRST + 0;
+
+// TEMPORARY file tracer for the DevTools crash hunt. Writes to
+// opennyx-devtools.log next to the working directory. Remove once fixed.
+void DevLog(const std::string& msg) {
+  FILE* f = std::fopen("opennyx-devtools.log", "a");
+  if (f) {
+    std::fprintf(f, "%s\n", msg.c_str());
+    std::fclose(f);
+  }
+}
 }  // namespace
 
 void OpenNyxClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
@@ -233,10 +243,25 @@ bool OpenNyxClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
                                          EventFlags event_flags) {
   CEF_REQUIRE_UI_THREAD();
   if (command_id == kMenuInspectElement) {
-    // Open DevTools inspecting the element that was right-clicked.
-    CefPoint inspect_at(params->GetXCoord(), params->GetYCoord());
-    browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr,
-                                     CefBrowserSettings(), inspect_at);
+    DevLog("1. OnContextMenuCommand: Inspect clicked");
+    if (!browser) {
+      DevLog("   ERROR: browser is null");
+      return true;
+    }
+    DevLog("2. browser ok, getting host");
+    CefRefPtr<CefBrowserHost> host = browser->GetHost();
+    if (!host) {
+      DevLog("   ERROR: host is null");
+      return true;
+    }
+    DevLog("3. host ok, HasDevTools=" +
+           std::string(host->HasDevTools() ? "yes" : "no"));
+    CefPoint inspect_at(params ? params->GetXCoord() : 0,
+                        params ? params->GetYCoord() : 0);
+    DevLog("4. calling ShowDevTools");
+    host->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(),
+                       inspect_at);
+    DevLog("5. ShowDevTools returned (no crash in the call itself)");
     return true;
   }
   return false;
