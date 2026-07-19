@@ -160,6 +160,11 @@ class BrowserWindow : public CefWindowDelegate,
   void MaybeCloseWindow();
   void UpdateTabStrip();
   void UpdateWindowTitle();
+  // Sets the address bar text with a reliable repaint. Clearing an unfocused
+  // CefTextfield to empty via SetText("") does not always repaint (the old
+  // text visually sticks); routing an empty target through select-all+delete
+  // forces a user-triggered edit that repaints.
+  void SetAddressBarText(const std::string& text);
   // Marks the empty caption area (drag spacer) as an OS-draggable region so a
   // frameless window can still be moved by dragging the top bar.
   void UpdateDraggableRegions();

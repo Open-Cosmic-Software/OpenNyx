@@ -32,19 +32,6 @@ namespace {
 
 BrowserWindow* g_browser_window = nullptr;
 
-// Temporary diagnostic tracer for the "new tab keeps old URL" bug. Writes to
-// opennyx-addr.log next to the exe. Removed once the bug is understood.
-void AddrLog(const std::string& msg) {
-  static FILE* f = nullptr;
-  if (!f) {
-    f = fopen("opennyx-addr.log", "a");
-  }
-  if (f) {
-    fprintf(f, "%s\n", msg.c_str());
-    fflush(f);
-  }
-}
-
 
 // ---- View ids ----
 enum ViewID {
@@ -686,13 +673,9 @@ void BrowserWindow::OnBrowserAddressChange(CefRefPtr<CefBrowser> browser,
     return;
   }
   // Don't clobber the user's typing.
-  const std::string spec = url.ToString();
-  AddrLog(std::string("OnAddrChange idx=") + std::to_string(index) +
-          " active=" + std::to_string(active_tab_) + " url=[" + spec +
-          "] barFocus=" +
-          (address_bar_ && address_bar_->HasFocus() ? "1" : "0"));
   if (address_bar_ && !address_bar_->HasFocus()) {
-    address_bar_->SetText(ShouldHideUrlInAddressBar(spec) ? "" : spec);
+    const std::string spec = url.ToString();
+    SetAddressBarText(ShouldHideUrlInAddressBar(spec) ? "" : spec);
   }
   UpdateChrome();
 }
@@ -830,10 +813,8 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
     // be attached yet (GetBrowser() null) or may briefly report about:blank,
     // either of which would otherwise leave the PREVIOUS tab's URL visible.
     // OnBrowserAddressChange will fill in a real URL once the user navigates.
-    AddrLog(std::string("CreateTab select clear barFocus=") +
-            (address_bar_ && address_bar_->HasFocus() ? "1" : "0"));
     if (address_bar_ && !address_bar_->HasFocus()) {
-      address_bar_->SetText("");
+      SetAddressBarText("");
     }
   } else {
     browser_view->SetVisible(false);
@@ -965,18 +946,13 @@ void BrowserWindow::SelectTab(size_t index) {
 
   // Sync toolbar state with the newly active tab.
   CefRefPtr<CefBrowser> browser = tabs_[index].browser_view->GetBrowser();
-  AddrLog(std::string("SelectTab idx=") + std::to_string(index) +
-          " browser=" + (browser ? "yes" : "NULL") + " barFocus=" +
-          (address_bar_ && address_bar_->HasFocus() ? "1" : "0"));
   if (browser) {
     // Always sync the address bar to the newly-activated tab. (No HasFocus
     // guard here: switching tabs is an explicit user action and must show the
     // new tab's URL, even if the address bar happened to hold focus.)
     if (address_bar_) {
       const std::string url = browser->GetMainFrame()->GetURL().ToString();
-      AddrLog(std::string("  SelectTab if-branch url=[") + url + "] hide=" +
-              (ShouldHideUrlInAddressBar(url) ? "1" : "0"));
-      address_bar_->SetText(ShouldHideUrlInAddressBar(url) ? "" : url);
+      SetAddressBarText(ShouldHideUrlInAddressBar(url) ? "" : url);
     }
     if (back_button_) {
       back_button_->SetEnabled(browser->CanGoBack());
@@ -990,7 +966,7 @@ void BrowserWindow::SelectTab(size_t index) {
     // PREVIOUS tab's URL. A brand-new tab always opens the new-tab page, so
     // show an empty, inviting address bar. Once the browser attaches,
     // OnBrowserAddressChange keeps it in sync.
-    address_bar_->SetText("");
+    SetAddressBarText("");
     if (back_button_) {
       back_button_->SetEnabled(false);
     }
@@ -1276,6 +1252,27 @@ void BrowserWindow::UpdateWindowTitle() {
     title = tabs_[active_tab_].title + " — OpenNyx";
   }
   window_->SetTitle(title);
+}
+
+void BrowserWindow::SetAddressBarText(const std::string& text) {
+  if (!address_bar_) {
+    return;
+  }
+  if (text.empty()) {
+    // SetText("") on an unfocused, already-populated textfield does not
+    // reliably repaint in CEF's views (the old URL visually sticks even though
+    // the model is cleared -- confirmed via tracing). Force a real edit:
+    // select everything, then Delete. This goes through the user-triggered
+    // change path which schedules a paint.
+    if (!address_bar_->GetText().empty()) {
+      address_bar_->SelectAll(false);
+      address_bar_->ExecuteCommand(CEF_TFC_DELETE);
+    }
+    // Belt and suspenders: also set empty so state is unambiguous.
+    address_bar_->SetText("");
+  } else {
+    address_bar_->SetText(text);
+  }
 }
 
 void BrowserWindow::UpdateDraggableRegions() {
