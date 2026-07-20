@@ -18,6 +18,7 @@
 #include "include/views/cef_label_button.h"
 #include "include/views/cef_menu_button.h"
 #include "include/views/cef_menu_button_delegate.h"
+#include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_panel_delegate.h"
 #include "include/views/cef_textfield.h"
@@ -255,6 +256,26 @@ class BrowserWindow : public CefWindowDelegate,
   // Persists the current open-tab URLs + active index so they can be restored
   // on next launch. Cheap; called whenever tabs change.
   void SaveSessionState();
+
+  // ---- Command palette (Ctrl+K) ----
+  // A top-center overlay with a search field + up to kPaletteMaxRows result
+  // buttons (quick actions + history/bookmark matches). Type to filter, Enter
+  // opens the top result, Esc closes.
+  void ShowCommandPalette();
+  void HideCommandPalette();
+  void RefreshPaletteResults();
+  void ActivatePaletteRow(int row);  // -1 = the first/top result.
+  struct PaletteItem {
+    std::string label;
+    std::string url;  // navigate target (empty = it's a plain action id)
+    int action_id = 0;
+  };
+  bool palette_visible_ = false;
+  CefRefPtr<CefOverlayController> palette_overlay_;
+  CefRefPtr<CefPanel> palette_panel_;
+  CefRefPtr<CefTextfield> palette_field_;
+  std::vector<CefRefPtr<CefLabelButton>> palette_rows_;
+  std::vector<PaletteItem> palette_items_;
 
   // ---- Tab context menu (right-click) ----
   // CEF Views buttons expose no right-click callback, so we poll the OS right

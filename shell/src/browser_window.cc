@@ -76,6 +76,10 @@ enum ViewID {
   ID_FIND_PREV,
   ID_FIND_NEXT,
   ID_FIND_CLOSE,
+  // Command palette overlay.
+  ID_PALETTE_PANEL,
+  ID_PALETTE_FIELD,
+  ID_PALETTE_ROW_FIRST = 1900,  // + row index (0..kPaletteMaxRows-1).
   // Frameless window controls (drawn by OpenNyx in the tab strip).
   ID_CAPTION_SPACER,
   ID_MINIMIZE_BUTTON,
@@ -108,7 +112,24 @@ enum CommandID {
   CMD_ZOOM_OUT,
   CMD_ZOOM_RESET,
   CMD_FIND,
+  CMD_PALETTE,
 };
+
+// Command-palette quick-action ids (stored in PaletteItem::action_id).
+enum PaletteAction {
+  PAL_NEW_TAB = 1,
+  PAL_HISTORY,
+  PAL_BOOKMARKS,
+  PAL_DOWNLOADS,
+  PAL_SETTINGS,
+  PAL_ABOUT,
+  PAL_RELOAD,
+  PAL_ZOOM_IN,
+  PAL_ZOOM_OUT,
+  PAL_ZOOM_RESET,
+};
+
+constexpr int kPaletteMaxRows = 7;
 
 // ---- App-menu / downloads-menu command ids (CefMenuModel) ----
 // Kept well above the accelerator ids to avoid any overlap.
@@ -752,6 +773,13 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window, int command_id) {
     case CMD_FIND:
       ShowFindBar();
       return true;
+    case CMD_PALETTE:
+      if (palette_visible_) {
+        HideCommandPalette();
+      } else {
+        ShowCommandPalette();
+      }
+      return true;
     default:
       return false;
   }
@@ -806,6 +834,19 @@ bool BrowserWindow::OnKeyEvent(CefRefPtr<CefTextfield> textfield,
     return false;
   }
 
+  // Command palette field: Enter = open top result, Esc = close.
+  if (textfield->GetID() == ID_PALETTE_FIELD) {
+    if (event.windows_key_code == kVK_RETURN) {
+      ActivatePaletteRow(-1);
+      return true;
+    }
+    if (event.windows_key_code == kVK_ESCAPE) {
+      HideCommandPalette();
+      return true;
+    }
+    return false;
+  }
+
   // Find bar: Enter = next, Shift+Enter = previous, Esc = close.
   if (textfield->GetID() == ID_FIND_FIELD) {
     if (event.windows_key_code == kVK_RETURN) {
@@ -849,7 +890,15 @@ bool BrowserWindow::OnKeyEvent(CefRefPtr<CefTextfield> textfield,
 
 void BrowserWindow::OnAfterUserAction(CefRefPtr<CefTextfield> textfield) {
   CEF_REQUIRE_UI_THREAD();
-  if (!textfield || textfield->GetID() != ID_ADDRESS_BAR) {
+  if (!textfield) {
+    return;
+  }
+  // Command palette: re-filter results as the user types.
+  if (textfield->GetID() == ID_PALETTE_FIELD) {
+    RefreshPaletteResults();
+    return;
+  }
+  if (textfield->GetID() != ID_ADDRESS_BAR) {
     return;
   }
   // Ignore the re-entrant call caused by our own SetText()/SelectRange() below.
@@ -979,6 +1028,13 @@ void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
       return;
     default:
       break;
+  }
+
+  // Command palette result rows.
+  if (id >= ID_PALETTE_ROW_FIRST &&
+      id < ID_PALETTE_ROW_FIRST + kPaletteMaxRows) {
+    ActivatePaletteRow(id - ID_PALETTE_ROW_FIRST);
+    return;
   }
 
   // Tab buttons: ID_TAB_FIRST + tab_id * 2 (title) / + 1 (close).
@@ -1265,6 +1321,196 @@ void BrowserWindow::SaveSessionState() {
     urls.push_back(url);
   }
   OpenNyxStore::Get()->SaveSession(urls, active_tab_);
+}
+
+// ---- Command palette (Ctrl+K) ----
+
+void BrowserWindow::ShowCommandPalette() {
+  CEF_REQUIRE_UI_THREAD();
+  if (!window_) {
+    return;
+  }
+  // Build the overlay lazily on first use.
+  if (!palette_panel_) {
+    palette_panel_ = CefPanel::CreatePanel(nullptr);
+    palette_panel_->SetID(ID_PALETTE_PANEL);
+    palette_panel_->SetBackgroundColor(CefColorSetARGB(255, 28, 29, 36));
+    CefBoxLayoutSettings pl;
+    pl.horizontal = false;
+    pl.between_child_spacing = 2;
+    pl.inside_border_horizontal_spacing = 8;
+    pl.inside_border_vertical_spacing = 8;
+    palette_panel_->SetToBoxLayout(pl);
+
+    palette_field_ = CefTextfield::CreateTextfield(this);
+    palette_field_->SetID(ID_PALETTE_FIELD);
+    palette_field_->SetFontList("Segoe UI, 15px");
+    palette_field_->SetPlaceholderText(
+        "Type a command, or search history\xE2\x80\xA6");
+    palette_field_->SetAccessibleName("Command palette");
+    palette_panel_->AddChildView(palette_field_);
+
+    for (int i = 0; i < kPaletteMaxRows; ++i) {
+      CefRefPtr<CefLabelButton> row =
+          CefLabelButton::CreateLabelButton(this, "");
+      row->SetID(ID_PALETTE_ROW_FIRST + i);
+      row->SetFontList("Segoe UI, 13px");
+      row->SetInkDropEnabled(true);
+      row->SetFocusable(false);
+      row->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+      row->SetMinimumSize(CefSize(520, 30));
+      row->SetMaximumSize(CefSize(520, 30));
+      row->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorText);
+      row->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorAccent);
+      row->SetVisible(false);
+      palette_panel_->AddChildView(row);
+      palette_rows_.push_back(row);
+    }
+
+    // CUSTOM docking lets us position/size the overlay ourselves (SetBounds).
+    palette_overlay_ =
+        window_->AddOverlayView(palette_panel_, CEF_DOCKING_MODE_CUSTOM);
+  }
+
+  palette_visible_ = true;
+  if (palette_field_) {
+    palette_field_->SetText("");
+  }
+  RefreshPaletteResults();
+  // Position: centered horizontally near the top.
+  if (palette_overlay_ && window_) {
+    const CefRect wb = window_->GetBounds();
+    const int w = 540;
+    const int x = (wb.width - w) / 2;
+    palette_overlay_->SetBounds(CefRect(x > 0 ? x : 20, 70, w, 320));
+    palette_overlay_->SetVisible(true);
+  }
+  if (palette_field_) {
+    palette_field_->RequestFocus();
+  }
+}
+
+void BrowserWindow::HideCommandPalette() {
+  CEF_REQUIRE_UI_THREAD();
+  palette_visible_ = false;
+  if (palette_overlay_) {
+    palette_overlay_->SetVisible(false);
+  }
+  if (CefRefPtr<CefBrowserView> view = ActiveBrowserView()) {
+    view->RequestFocus();
+  }
+}
+
+void BrowserWindow::RefreshPaletteResults() {
+  CEF_REQUIRE_UI_THREAD();
+  if (!palette_field_) {
+    return;
+  }
+  const std::string q = palette_field_->GetText().ToString();
+  auto lower = [](std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower((unsigned char)c));
+    return s;
+  };
+  const std::string ql = lower(q);
+
+  palette_items_.clear();
+
+  // Fixed quick actions (filtered by query substring).
+  struct QA {
+    const char* label;
+    int action;
+  };
+  const QA actions[] = {
+      {"New tab", PAL_NEW_TAB},        {"Open History", PAL_HISTORY},
+      {"Open Bookmarks", PAL_BOOKMARKS}, {"Open Downloads", PAL_DOWNLOADS},
+      {"Open Settings", PAL_SETTINGS},   {"About OpenNyx", PAL_ABOUT},
+      {"Reload page", PAL_RELOAD},       {"Zoom in", PAL_ZOOM_IN},
+      {"Zoom out", PAL_ZOOM_OUT},        {"Reset zoom", PAL_ZOOM_RESET},
+  };
+  for (const QA& a : actions) {
+    if (ql.empty() || lower(a.label).find(ql) != std::string::npos) {
+      PaletteItem it;
+      it.label = std::string("\xE2\x9A\xA1 ") + a.label;  // lightning glyph
+      it.action_id = a.action;
+      palette_items_.push_back(it);
+    }
+  }
+
+  // History / bookmark matches (only when the user typed something).
+  if (ql.size() >= 2) {
+    auto hist = OpenNyxStore::Get()->QueryHistory(q, 20);
+    for (const auto& h : hist) {
+      if (palette_items_.size() >= (size_t)kPaletteMaxRows) break;
+      PaletteItem it;
+      std::string title = h.title.empty() ? h.url : h.title;
+      if (title.size() > 60) title = title.substr(0, 57) + "...";
+      it.label = std::string("\xF0\x9F\x95\x98 ") + title;  // clock glyph
+      it.url = h.url;
+      palette_items_.push_back(it);
+    }
+  }
+
+  // Render rows.
+  for (int i = 0; i < kPaletteMaxRows; ++i) {
+    if (i < (int)palette_items_.size()) {
+      palette_rows_[i]->SetText(palette_items_[i].label);
+      palette_rows_[i]->SetVisible(true);
+    } else {
+      palette_rows_[i]->SetVisible(false);
+    }
+  }
+  if (palette_panel_) {
+    palette_panel_->InvalidateLayout();
+  }
+}
+
+void BrowserWindow::ActivatePaletteRow(int row) {
+  CEF_REQUIRE_UI_THREAD();
+  int idx = row;
+  if (idx < 0) idx = 0;  // -1 = top result (Enter).
+  if (idx >= (int)palette_items_.size()) {
+    return;
+  }
+  const PaletteItem it = palette_items_[idx];
+  HideCommandPalette();
+  if (!it.url.empty()) {
+    CreateTab(it.url, /*select=*/true);
+    return;
+  }
+  switch (it.action_id) {
+    case PAL_NEW_TAB:
+      CreateTab(GetNewTabURL(), true);
+      break;
+    case PAL_HISTORY:
+      CreateTab("opennyx://history", true);
+      break;
+    case PAL_BOOKMARKS:
+      CreateTab("opennyx://bookmarks", true);
+      break;
+    case PAL_DOWNLOADS:
+      CreateTab("opennyx://downloads", true);
+      break;
+    case PAL_SETTINGS:
+      CreateTab("opennyx://settings", true);
+      break;
+    case PAL_ABOUT:
+      CreateTab("opennyx://about", true);
+      break;
+    case PAL_RELOAD:
+      if (CefRefPtr<CefBrowser> b = ActiveBrowser()) b->Reload();
+      break;
+    case PAL_ZOOM_IN:
+      ZoomActiveTab(1);
+      break;
+    case PAL_ZOOM_OUT:
+      ZoomActiveTab(-1);
+      break;
+    case PAL_ZOOM_RESET:
+      ZoomActiveTab(0);
+      break;
+    default:
+      break;
+  }
 }
 
 // ---- Find-in-page ----
@@ -2098,6 +2344,8 @@ void BrowserWindow::AddAccelerators() {
   window_->SetAccelerator(CMD_ZOOM_RESET, '0', false, true, false, true);
   // Find in page: Ctrl+F.
   window_->SetAccelerator(CMD_FIND, 'F', false, true, false, true);
+  // Command palette: Ctrl+K.
+  window_->SetAccelerator(CMD_PALETTE, 'K', false, true, false, true);
 }
 
 CefRefPtr<CefBrowserView> BrowserWindow::ActiveBrowserView() {
