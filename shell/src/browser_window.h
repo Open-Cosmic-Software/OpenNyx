@@ -32,10 +32,13 @@
 //  * one CefBrowserView per tab (only the active tab is visible).
 //
 // All methods must be called on the CEF UI thread.
+// NOTE: CefMenuButtonDelegate already derives from CefButtonDelegate, so we
+// must NOT list CefButtonDelegate separately (that creates an ambiguous
+// duplicate base). CefMenuButtonDelegate covers both button + menu-button
+// callbacks.
 class BrowserWindow : public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public CefTextfieldDelegate,
-                      public CefButtonDelegate,
                       public CefMenuButtonDelegate,
                       public CefMenuModelDelegate {
  public:

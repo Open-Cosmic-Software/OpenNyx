@@ -521,7 +521,8 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   address_bar_ = nullptr;
   star_button_ = nullptr;
   shield_button_ = nullptr;
-  menu_button_ = nullptr;
+  app_menu_button_ = nullptr;
+  downloads_button_ = nullptr;
   caption_spacer_ = nullptr;
   minimize_button_ = nullptr;
   maximize_button_ = nullptr;
