@@ -107,6 +107,8 @@ class OpenNyxStore {
   bool RemovePassword(const std::string& origin, const std::string& username);
   // Decrypted credentials (most-recent first).
   std::vector<PasswordEntry> GetPasswords();
+  // Decrypted credentials whose origin host matches |host| (for autofill).
+  std::vector<PasswordEntry> GetPasswordsForHost(const std::string& host);
   void ClearPasswords();
   // Imports many credentials at once (e.g. from a Chrome/Opera CSV export).
   // Returns the number successfully added/updated.

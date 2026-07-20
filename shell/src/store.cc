@@ -450,6 +450,41 @@ std::vector<PasswordEntry> OpenNyxStore::GetPasswords() {
   return out;
 }
 
+std::vector<PasswordEntry> OpenNyxStore::GetPasswordsForHost(
+    const std::string& host) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  // Extract the registrable host from a stored origin, tolerant of entries
+  // saved as bare hosts ("example.com") or full URLs ("https://example.com/..").
+  auto host_of = [](const std::string& origin) -> std::string {
+    CefURLParts parts;
+    std::string in = origin;
+    if (in.find("://") == std::string::npos) in = "https://" + in;
+    if (CefParseURL(in, parts)) {
+      std::string h = CefString(&parts.host).ToString();
+      return ToLower(h);
+    }
+    return ToLower(origin);
+  };
+  const std::string want = ToLower(host);
+  std::vector<PasswordEntry> out;
+  // newest first
+  for (auto it = passwords_.rbegin(); it != passwords_.rend(); ++it) {
+    const std::string h = host_of(it->origin);
+    // match exact host or a parent-domain suffix (login.example.com ~ example.com)
+    if (h == want ||
+        (want.size() > h.size() &&
+         want.compare(want.size() - h.size() - 1, h.size() + 1,
+                      "." + h) == 0) ||
+        (h.size() > want.size() &&
+         h.compare(h.size() - want.size() - 1, want.size() + 1,
+                   "." + want) == 0)) {
+      out.push_back(*it);
+    }
+  }
+  return out;
+}
+
 void OpenNyxStore::ClearPasswords() {
   std::lock_guard<std::mutex> lock(mutex_);
   EnsureLoaded();

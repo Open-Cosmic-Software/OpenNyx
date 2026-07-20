@@ -171,8 +171,19 @@ CefRefPtr<CefResourceHandler> JsonResponse(const json& j) {
 CefRefPtr<CefResourceHandler> HandleApi(const std::string& endpoint,
                                         const std::string& query,
                                         const std::string& method,
-                                        const std::string& body) {
+                                        const std::string& body,
+                                        bool from_internal_page) {
   OpenNyxStore* store = OpenNyxStore::Get();
+
+  // Password endpoints are sensitive. Reading/enumerating/clearing is allowed
+  // ONLY from our internal opennyx:// pages (the manager UI). A random website
+  // must never be able to fetch the vault. `passwords/add` is the one exception
+  // \u2014 the autofill save-prompt on a real site posts a single credential the
+  // user just typed there (it can only ADD, never read or list).
+  if (endpoint.rfind("passwords", 0) == 0 && !from_internal_page &&
+      endpoint != "passwords/add") {
+    return JsonResponse(json{{"error", "forbidden"}});
+  }
 
   if (endpoint == "config") {
     if (method == "POST") {
@@ -386,7 +397,17 @@ class OpenNyxSchemeHandlerFactory : public CefSchemeHandlerFactory {
     if (p.host == "api") {
       const std::string body =
           (method == "POST") ? ReadPostBody(request) : std::string();
-      return HandleApi(p.path, p.query, method, body);
+      // Trust only requests originating from our own internal pages. The
+      // Referer/Origin of an opennyx:// page starts with "opennyx://".
+      std::string ref = request->GetReferrerURL().ToString();
+      if (ref.empty()) {
+        CefRequest::HeaderMap hm;
+        request->GetHeaderMap(hm);
+        auto it = hm.find("Origin");
+        if (it != hm.end()) ref = it->second.ToString();
+      }
+      const bool internal = ref.rfind("opennyx://", 0) == 0;
+      return HandleApi(p.path, p.query, method, body, internal);
     }
 
     // Otherwise serve a page (default newtab).

@@ -91,6 +91,129 @@ void OpenNyxClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
   }
 }
 
+// Autofill content-script. The browser process injects this on every page load
+// with the credentials for the current site spliced in between HEAD and TAIL as
+// a JS array literal `var __onx_creds = [...]`. The script:
+//   * fills the first empty username/password pair when exactly one login is
+//     stored (or when the user picks from the OpenNyx dropdown),
+//   * shows a small OpenNyx account-picker anchored to the focused field when
+//     multiple logins match,
+//   * offers to save/update a new login on form submit.
+const char* const kAutofillScriptHead = R"AF(
+(function(){
+  var __onx_arr = )AF";
+
+const char* const kAutofillScriptTail = R"AF(;
+  // Re-injected on every load: refresh creds, install listeners only once.
+  window.__onxCreds = __onx_arr;
+  if(window.__onxAutofillInstalled){return;}
+  window.__onxAutofillInstalled = true;
+  function C_(){return window.__onxCreds||[];}
+  function pwFields(){return [].slice.call(document.querySelectorAll('input[type=password]')).filter(function(e){return e.offsetParent!==null;});}
+  function userFor(pw){
+    // Nearest preceding text/email/tel input in the same form (or document).
+    var scope=pw.form||document;var ins=[].slice.call(scope.querySelectorAll('input'));
+    var idx=ins.indexOf(pw);
+    for(var i=idx-1;i>=0;i--){var t=(ins[i].type||'text').toLowerCase();
+      if(t==='text'||t==='email'||t==='tel'||t===''){return ins[i];}}
+    // fall back: any text/email input on the page
+    for(var j=0;j<ins.length;j++){var t2=(ins[j].type||'text').toLowerCase();
+      if(t2==='email'||t2==='text'){return ins[j];}}
+    return null;
+  }
+  function setVal(el,val){
+    if(!el)return;
+    var d=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');
+    d&&d.set?d.set.call(el,val):(el.value=val);
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  function fill(cred){
+    var pws=pwFields();if(!pws.length)return;
+    var pw=pws[0];var u=userFor(pw);
+    if(u)setVal(u,cred.u);setVal(pw,cred.p);
+  }
+  function removeMenu(){var m=document.getElementById('__onx_menu');if(m)m.remove();}
+  function showMenu(anchor){
+    removeMenu();
+    var C=C_();if(!C||!C.length)return;
+    var r=anchor.getBoundingClientRect();
+    var box=document.createElement('div');box.id='__onx_menu';
+    box.style.cssText='position:absolute;z-index:2147483647;min-width:'+Math.max(220,r.width)+'px;'+
+      'background:#1c1d24;border:1px solid #33343f;border-radius:10px;'+
+      'box-shadow:0 10px 34px rgba(0,0,0,.5);font:13px system-ui,sans-serif;'+
+      'color:#e8e9f0;overflow:hidden;padding:4px;';
+    box.style.left=(window.scrollX+r.left)+'px';
+    box.style.top=(window.scrollY+r.bottom+4)+'px';
+    var hdr=document.createElement('div');
+    hdr.textContent='OpenNyx \u2014 choose account';
+    hdr.style.cssText='font-size:11px;color:#8b8ca3;padding:6px 8px 4px;';
+    box.appendChild(hdr);
+    C_().forEach(function(cred){
+      var it=document.createElement('div');
+      it.textContent=cred.u||'(no username)';
+      it.style.cssText='padding:8px 10px;border-radius:7px;cursor:pointer;';
+      it.addEventListener('mouseenter',function(){it.style.background='#2a2b36';});
+      it.addEventListener('mouseleave',function(){it.style.background='';});
+      it.addEventListener('mousedown',function(ev){ev.preventDefault();fill(cred);removeMenu();});
+      box.appendChild(it);
+    });
+    document.body.appendChild(box);
+  }
+  function onFocus(e){
+    var t=e.target;if(!t||t.tagName!=='INPUT')return;
+    var ty=(t.type||'').toLowerCase();
+    if(ty==='password'||ty==='email'||ty==='text'||ty===''){
+      var C=C_();
+      if(C&&C.length>1){showMenu(t);}
+      else if(C&&C.length===1){/* single: auto-filled below */}
+    }
+  }
+  document.addEventListener('focusin',onFocus,true);
+  document.addEventListener('mousedown',function(e){
+    if(e.target&&e.target.closest&&e.target.closest('#__onx_menu'))return;removeMenu();},true);
+  // Auto-fill immediately if exactly one credential is stored.
+  function autofillOnce(){var C=C_();if(C&&C.length===1&&pwFields().length){fill(C[0]);}}
+  if(document.readyState!=='loading')setTimeout(autofillOnce,60);
+  else document.addEventListener('DOMContentLoaded',function(){setTimeout(autofillOnce,60);});
+  // Save-prompt: capture credentials on submit and offer to store them.
+  function captureSubmit(){
+    var pws=pwFields();if(!pws.length)return;var pw=pws[0];var u=userFor(pw);
+    var user=u?u.value:'';var pass=pw.value;if(!pass)return;
+    var known=(C_()||[]).some(function(c){return c.u===user&&c.p===pass;});
+    if(known)return;
+    showSavePrompt(user,pass);
+  }
+  document.addEventListener('submit',function(){setTimeout(captureSubmit,0);},true);
+  function showSavePrompt(user,pass){
+    var old=document.getElementById('__onx_save');if(old)old.remove();
+    var box=document.createElement('div');box.id='__onx_save';
+    box.style.cssText='position:fixed;top:14px;right:14px;z-index:2147483647;'+
+      'background:#1c1d24;border:1px solid #33343f;border-radius:12px;'+
+      'box-shadow:0 12px 40px rgba(0,0,0,.55);font:13px system-ui,sans-serif;'+
+      'color:#e8e9f0;padding:14px 16px;max-width:300px;';
+    box.innerHTML='<div style="font-weight:600;margin-bottom:4px">Save password in OpenNyx?</div>'+
+      '<div style="font-size:12px;color:#8b8ca3;margin-bottom:10px;word-break:break-all">'+(user||'(no username)')+'</div>';
+    var row=document.createElement('div');row.style.cssText='display:flex;gap:8px;justify-content:flex-end';
+    var no=document.createElement('button');no.textContent='Not now';
+    no.style.cssText='background:#2a2b36;color:#e8e9f0;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit;';
+    var yes=document.createElement('button');yes.textContent='Save';
+    yes.style.cssText='background:#7a5cff;color:#fff;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit;';
+    no.addEventListener('click',function(){box.remove();});
+    yes.addEventListener('click',function(){
+      // Persist via the internal api scheme (passwords/add is the only vault
+      // endpoint a real site may call, and only to add what the user typed).
+      fetch('opennyx://api/passwords/add',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({origin:location.origin,username:user,password:pass})}).catch(function(){});
+      box.remove();
+    });
+    row.appendChild(no);row.appendChild(yes);box.appendChild(row);
+    document.body.appendChild(box);
+    setTimeout(function(){if(box.parentNode)box.remove();},15000);
+  }
+})();
+)AF";
+
 void OpenNyxClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
                              CefRefPtr<CefFrame> frame,
                              int httpStatusCode) {
@@ -109,9 +232,67 @@ void OpenNyxClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
   if (BrowserWindow* window = BrowserWindow::Get()) {
     window->RefreshChromeForBrowser(browser);
   }
+  MaybeInjectAutofill(frame, url);
+}
+
+namespace {
+
+// Host component of a URL (empty on failure).
+std::string AutofillHostOf(const std::string& url) {
+  CefURLParts parts;
+  if (!CefParseURL(url, parts)) return std::string();
+  return CefString(&parts.host).ToString();
+}
+
+// JSON-string-escape for safely embedding values in the injected script.
+std::string JsEscape(const std::string& s) {
+  std::string o;
+  o.reserve(s.size() + 8);
+  for (char c : s) {
+    switch (c) {
+      case '\\': o += "\\\\"; break;
+      case '"': o += "\\\""; break;
+      case '\n': o += "\\n"; break;
+      case '\r': o += "\\r"; break;
+      case '<': o += "\\u003c"; break;
+      case '>': o += "\\u003e"; break;
+      case '&': o += "\\u0026"; break;
+      default: o += c;
+    }
+  }
+  return o;
+}
+
+}  // namespace
+
+void OpenNyxClient::MaybeInjectAutofill(CefRefPtr<CefFrame> frame,
+                                        const std::string& url) {
+  // Only real web pages (http/https), never our internal pages.
+  if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+    return;
+  }
+  const std::string host = AutofillHostOf(url);
+  if (host.empty()) return;
+
+  auto creds = OpenNyxStore::Get()->GetPasswordsForHost(host);
+
+  // Build a JS array literal of {u,p} objects for this site (may be empty; the
+  // script still installs the save-prompt observer for new logins).
+  std::string arr = "[";
+  for (size_t i = 0; i < creds.size(); ++i) {
+    if (i) arr += ",";
+    arr += "{u:\"" + JsEscape(creds[i].username) + "\",p:\"" +
+           JsEscape(creds[i].password) + "\"}";
+  }
+  arr += "]";
+
+  const std::string js = std::string(kAutofillScriptHead) + arr +
+                         kAutofillScriptTail;
+  frame->ExecuteJavaScript(js, frame->GetURL(), 0);
 }
 
 // ---- CefDownloadHandler ----
+
 
 namespace {
 

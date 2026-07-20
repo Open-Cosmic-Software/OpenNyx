@@ -85,6 +85,10 @@ class OpenNyxClient : public CefClient,
   void OnLoadEnd(CefRefPtr<CefBrowser> browser,
                  CefRefPtr<CefFrame> frame,
                  int httpStatusCode) override;
+
+  // Injects the password-autofill content script into |frame| (http/https
+  // pages only), splicing in the stored credentials for the page's host.
+  void MaybeInjectAutofill(CefRefPtr<CefFrame> frame, const std::string& url);
   void OnLoadError(CefRefPtr<CefBrowser> browser,
                    CefRefPtr<CefFrame> frame,
                    ErrorCode errorCode,

@@ -153,6 +153,7 @@ std::string NavBar(const char* active) {
                         {"history", "History"},
                         {"bookmarks", "Bookmarks"},
                         {"downloads", "Downloads"},
+                        {"passwords", "Passwords"},
                         {"settings", "Settings"}};
   for (const auto& it : items) {
     const bool on = std::string(active) == it.page;
@@ -219,6 +220,7 @@ const tiles=[['🔍','Search','opennyx://newtab'],
   ['🗺️','Maps','https://www.openstreetmap.org/'],
   ['🕘','History','opennyx://history'],
   ['⭐','Bookmarks','opennyx://bookmarks'],
+  ['🔑','Passwords','opennyx://passwords'],
   ['⚙️','Settings','opennyx://settings']];
 document.getElementById('tiles').innerHTML=tiles.map(t=>
   `<a href="${t[2]}" style="display:flex;flex-direction:column;
