@@ -85,6 +85,10 @@ button.mini{padding:5px 10px;font-size:12px;border-radius:7px}
 .bar{height:6px;background:var(--border);border-radius:6px;overflow:hidden;
   margin-top:6px}
 .bar > i{display:block;height:100%;background:var(--accent);width:0}
+.dlact{display:flex;gap:14px;margin-top:7px}
+.linkbtn{background:none;border:none;color:var(--accent);cursor:pointer;
+  padding:0;font-size:12.5px}
+.linkbtn:hover{text-decoration:underline}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
   background:var(--panel2);border:1px solid var(--border2);color:var(--text);
   padding:11px 18px;border-radius:10px;font-size:13.5px;opacity:0;
@@ -311,6 +315,7 @@ std::string DownloadsPage() {
 <h1>Downloads</h1>
 <p class="sub">Files downloaded with OpenNyx.</p>
 <div style="display:flex;gap:10px;margin-bottom:16px">
+  <button class="ghost" id="openfolder">Open downloads folder</button>
   <button class="ghost" id="clr">Clear list</button>
 </div>
 <div class="card"><div id="list"><div class="empty">Loading…</div></div></div>
@@ -329,13 +334,34 @@ async function load(){
       pill='<span class="pill">downloading</span>';}
     const barhtml=d.complete||d.canceled?'':
       `<div class="bar"><i style="width:${d.percent}%"></i></div>`;
+    // Only completed, non-canceled files can be opened / revealed.
+    const p=(d.full_path||'').replace(/"/g,'&quot;');
+    const actions=(d.complete&&!d.canceled&&p)?
+      `<div class="dlact">`+
+      `<button class="linkbtn" data-open="${p}">Open</button>`+
+      `<button class="linkbtn" data-reveal="${p}">Show in folder</button>`+
+      `</div>`:'';
     return `<div class="row"><div class="grow">
       <div class="t">${esc(d.filename)} ${pill}</div>
-      <div class="u">${esc(d.url)}</div>${barhtml}</div>
+      <div class="u">${esc(d.url)}</div>${barhtml}${actions}</div>
       <div class="meta">${esc(status)}</div></div>`;}).join('');
+  // Wire the per-file Open / Show-in-folder buttons.
+  list.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',
+    async()=>{const r=await api('downloads/open',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:b.getAttribute('data-open')})});
+      if(!r||!r.ok)toast('Could not open file');}));
+  list.querySelectorAll('[data-reveal]').forEach(b=>b.addEventListener('click',
+    async()=>{const r=await api('downloads/reveal',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:b.getAttribute('data-reveal')})});
+      if(!r||!r.ok)toast('Could not show file');}));
 }
 document.getElementById('clr').addEventListener('click',async()=>{
   await api('downloads/clear',{method:'POST'});toast('Cleared');load();});
+document.getElementById('openfolder').addEventListener('click',async()=>{
+  const r=await api('downloads/openfolder',{method:'POST'});
+  if(!r||!r.ok)toast('Could not open folder');});
 load();
 setInterval(load,1200);
 )JS";

@@ -274,6 +274,31 @@ CefRefPtr<CefResourceHandler> HandleApi(const std::string& endpoint,
     return JsonResponse(json{{"ok", true}});
   }
 
+  // Open a downloaded file with its default application.
+  if (endpoint == "downloads/open" && method == "POST") {
+    json j = json::parse(body, nullptr, false);
+    bool ok = false;
+    if (j.is_object()) {
+      ok = BrowserWindow::OpenPath(j.value("path", ""));
+    }
+    return JsonResponse(json{{"ok", ok}});
+  }
+
+  // Reveal a downloaded file in the OS file manager (selects it).
+  if (endpoint == "downloads/reveal" && method == "POST") {
+    json j = json::parse(body, nullptr, false);
+    bool ok = false;
+    if (j.is_object()) {
+      ok = BrowserWindow::RevealPath(j.value("path", ""));
+    }
+    return JsonResponse(json{{"ok", ok}});
+  }
+
+  // Open the default Downloads folder itself.
+  if (endpoint == "downloads/openfolder" && method == "POST") {
+    return JsonResponse(json{{"ok", BrowserWindow::OpenDownloadsFolder()}});
+  }
+
   if (endpoint == "cleardata" && method == "POST") {
     store->ClearBrowsingData();
     // Also ask the browser layer to clear cookies/cache.

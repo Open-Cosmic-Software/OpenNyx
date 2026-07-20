@@ -16,6 +16,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+// For ShellExecuteW (open file / folder) and SHOpenFolderAndSelectItems
+// (reveal-in-Explorer) used by the downloads page shell helpers.
+#include <shellapi.h>
+#include <shlobj.h>
 #endif
 
 #include <algorithm>
@@ -98,6 +102,8 @@ constexpr int kVK_RETURN = 0x0D;
 constexpr int kVK_ESCAPE = 0x1B;
 constexpr int kVK_TAB = 0x09;
 constexpr int kVK_F5 = 0x74;
+constexpr int kVK_BACK = 0x08;    // Backspace.
+constexpr int kVK_DELETE = 0x2E;  // Delete.
 constexpr int kVK_LEFT = 0x25;
 constexpr int kVK_RIGHT = 0x27;
 constexpr int kVK_PRIOR = 0x21;  // Page Up.
@@ -654,6 +660,12 @@ bool BrowserWindow::OnKeyEvent(CefRefPtr<CefTextfield> textfield,
     return false;
   }
 
+  // Deleting characters must not immediately re-suggest the same completion.
+  if (event.windows_key_code == kVK_BACK ||
+      event.windows_key_code == kVK_DELETE) {
+    suppress_autocomplete_ = true;
+  }
+
   if (event.windows_key_code == kVK_RETURN) {
     NavigateActiveTab(textfield->GetText().ToString());
     return true;
@@ -669,6 +681,69 @@ bool BrowserWindow::OnKeyEvent(CefRefPtr<CefTextfield> textfield,
     return true;
   }
   return false;
+}
+
+void BrowserWindow::OnAfterUserAction(CefRefPtr<CefTextfield> textfield) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!textfield || textfield->GetID() != ID_ADDRESS_BAR) {
+    return;
+  }
+  // Ignore the re-entrant call caused by our own SetText()/SelectRange() below.
+  if (in_autocomplete_) {
+    return;
+  }
+  // Skip right after Backspace/Delete so removing characters doesn't re-add a
+  // suggestion the user is trying to erase.
+  if (suppress_autocomplete_) {
+    suppress_autocomplete_ = false;
+    return;
+  }
+  // Only autocomplete when the caret is at the very end with no active
+  // selection -- i.e. the user is typing forward, not editing the middle.
+  if (textfield->HasSelection()) {
+    return;
+  }
+  const std::string typed = textfield->GetText().ToString();
+  if (typed.size() < 2) {
+    return;
+  }
+  // Don't suggest over an address the user is deliberately spelling with a
+  // space (a search query) -- only complete single tokens / URLs.
+  if (typed.find(' ') != std::string::npos) {
+    return;
+  }
+  if (textfield->GetCursorPosition() != typed.size()) {
+    return;  // caret not at end
+  }
+  const std::string match = OpenNyxStore::Get()->AutocompleteHistory(typed);
+  if (match.empty()) {
+    return;
+  }
+  // Find where the typed prefix lines up inside the matched URL (the store
+  // matches after stripping scheme/www), then append only the remainder.
+  auto lower = [](std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower((unsigned char)c));
+    return s;
+  };
+  const std::string mlow = lower(match);
+  const std::string tlow = lower(typed);
+  const size_t pos = mlow.find(tlow);
+  if (pos == std::string::npos) {
+    return;
+  }
+  const size_t suffix_start = pos + typed.size();
+  if (suffix_start >= match.size()) {
+    return;  // nothing left to suggest
+  }
+  // Rebuild the field as: exactly-what-was-typed + remaining-suggestion, then
+  // select the suggested tail so the next keystroke replaces it.
+  const std::string completed = typed + match.substr(suffix_start);
+  in_autocomplete_ = true;
+  textfield->SetText(completed);
+  textfield->SelectRange(
+      CefRange(static_cast<int>(typed.size()),
+               static_cast<int>(completed.size())));
+  in_autocomplete_ = false;
 }
 
 // ---- CefButtonDelegate ----
@@ -1709,4 +1784,89 @@ void BrowserWindow::RequestClearBrowsingData() {
       cookies->DeleteCookies(CefString(), CefString(), nullptr);
     }
   }
+}
+
+#if defined(_WIN32)
+namespace {
+// Convert a UTF-8 std::string to a UTF-16 std::wstring for the Win32 *W APIs.
+std::wstring Utf8ToWide(const std::string& s) {
+  if (s.empty()) {
+    return std::wstring();
+  }
+  const int len = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(),
+                                        static_cast<int>(s.size()), nullptr, 0);
+  std::wstring w(len, L'\0');
+  ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()),
+                        &w[0], len);
+  return w;
+}
+}  // namespace
+#endif
+
+bool BrowserWindow::OpenPath(const std::string& path) {
+#if defined(_WIN32)
+  if (path.empty()) {
+    return false;
+  }
+  const std::wstring wpath = Utf8ToWide(path);
+  const HINSTANCE r = ::ShellExecuteW(nullptr, L"open", wpath.c_str(), nullptr,
+                                      nullptr, SW_SHOWNORMAL);
+  return reinterpret_cast<INT_PTR>(r) > 32;
+#else
+  return false;
+#endif
+}
+
+bool BrowserWindow::RevealPath(const std::string& path) {
+#if defined(_WIN32)
+  if (path.empty()) {
+    return false;
+  }
+  const std::wstring wpath = Utf8ToWide(path);
+  bool ok = false;
+  const bool need_uninit = SUCCEEDED(::CoInitializeEx(
+      nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
+  PIDLIST_ABSOLUTE pidl = ::ILCreateFromPathW(wpath.c_str());
+  if (pidl) {
+    ok = SUCCEEDED(::SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0));
+    ::ILFree(pidl);
+  }
+  if (need_uninit) {
+    ::CoUninitialize();
+  }
+  // Fallback: if reveal failed, at least open the containing folder.
+  if (!ok) {
+    const size_t slash = path.find_last_of("\\/");
+    if (slash != std::string::npos) {
+      return OpenPath(path.substr(0, slash));
+    }
+  }
+  return ok;
+#else
+  return false;
+#endif
+}
+
+bool BrowserWindow::OpenDownloadsFolder() {
+#if defined(_WIN32)
+  // Resolve the user's Downloads folder (FOLDERID_Downloads).
+  PWSTR wpath = nullptr;
+  std::wstring folder;
+  if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Downloads, 0, nullptr,
+                                       &wpath)) &&
+      wpath) {
+    folder = wpath;
+  }
+  if (wpath) {
+    ::CoTaskMemFree(wpath);
+  }
+  if (folder.empty()) {
+    return false;
+  }
+  const HINSTANCE r = ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr,
+                                      nullptr, SW_SHOWNORMAL);
+  return reinterpret_cast<INT_PTR>(r) > 32;
+#else
+  return false;
+#endif
 }

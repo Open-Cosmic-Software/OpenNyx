@@ -62,6 +62,14 @@ class BrowserWindow : public CefWindowDelegate,
   // page "clear browsing data"). Static: posts to the UI thread.
   static void RequestClearBrowsingData();
 
+  // Shell helpers for the downloads page (Windows ShellExecute-based).
+  // OpenPath: open a file with its default app. RevealPath: show the file in
+  // Explorer with it selected. OpenDownloadsFolder: open the default Downloads
+  // directory. Each returns true on success.
+  static bool OpenPath(const std::string& path);
+  static bool RevealPath(const std::string& path);
+  static bool OpenDownloadsFolder();
+
   // Number of open tabs.
   size_t tab_count() const { return tabs_.size(); }
 
@@ -132,6 +140,10 @@ class BrowserWindow : public CefWindowDelegate,
   // ---- CefTextfieldDelegate ----
   bool OnKeyEvent(CefRefPtr<CefTextfield> textfield,
                   const CefKeyEvent& event) override;
+  // Inline address-bar autocomplete from history: after each edit, append the
+  // best matching history URL and select the appended part (so the next
+  // keystroke overwrites it). Suppressed after Backspace/Delete.
+  void OnAfterUserAction(CefRefPtr<CefTextfield> textfield) override;
 
   // ---- CefButtonDelegate ----
   void OnButtonPressed(CefRefPtr<CefButton> button) override;
@@ -209,6 +221,12 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefLabelButton> maximize_button_;
   CefRefPtr<CefLabelButton> close_window_button_;
   bool is_maximized_ = false;
+  // When true, the next OnAfterUserAction skips inline autocomplete (set after
+  // Backspace/Delete so deleting characters doesn't immediately re-suggest).
+  bool suppress_autocomplete_ = false;
+  // Re-entrancy guard: our own SetText()/SelectRange() inside the autocomplete
+  // handler would recursively fire OnAfterUserAction.
+  bool in_autocomplete_ = false;
 
   // Updates the star (filled/hollow) + shield count from the active tab URL.
   void UpdateChrome();
