@@ -284,6 +284,10 @@ class BrowserWindow : public CefWindowDelegate,
   void ShowTabContextMenu(int tab_id);
   int context_menu_tab_id_ = -1;  // tab the context menu currently targets.
   bool rbutton_was_down_ = false;  // edge detection for the right mouse button.
+  // While the whole window is closing we drain tabs one by one; suppress the
+  // per-tab session save so the final saved session keeps ALL open tabs (they
+  // are restored on next launch). The full session is snapshotted once up front.
+  bool shutting_down_ = false;
 
   // ---- Find-in-page ----
   void ShowFindBar();

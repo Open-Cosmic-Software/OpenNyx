@@ -680,6 +680,12 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow> window) {
   // routes here (CloseTabAt detaches the view instead of calling
   // CloseBrowser, so CEF never asks the shared window to close).
   //
+  // Save the CURRENT full set of open tabs so they are restored next launch,
+  // then suppress the per-tab saves that RemoveTabAt would otherwise do while
+  // draining the strip (which would leave an empty session).
+  SaveSessionState();
+  shutting_down_ = true;
+
   // Detach every remaining tab and release our references. Each release
   // triggers ~CefBrowserViewImpl -> WindowDestroyed() -> forced destruction
   // of that browser only (see CloseTabAt for details). OnBeforeClose fires
@@ -2005,8 +2011,12 @@ void BrowserWindow::RemoveTabAt(size_t index) {
     SelectTab(active_tab_);
   }
   window_->InvalidateLayout();
-  // Persist the smaller tab set so a closed tab doesn't come back on restore.
-  SaveSessionState();
+  // Persist the smaller tab set so a user-closed tab doesn't come back on
+  // restore -- but NOT while the whole window is shutting down (there we want
+  // to keep the full set of tabs that were open, saved once in CanClose).
+  if (!shutting_down_) {
+    SaveSessionState();
+  }
 }
 
 void BrowserWindow::SelectTab(size_t index) {
