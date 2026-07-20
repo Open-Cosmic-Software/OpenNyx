@@ -246,6 +246,10 @@ class BrowserWindow : public CefWindowDelegate,
   // Applies a zoom step to the active tab. delta = +1 (in), -1 (out), 0 (reset
   // to 100%). Zoom uses CEF's logarithmic level: each step is ~1.2x.
   void ZoomActiveTab(int delta);
+
+  // Persists the current open-tab URLs + active index so they can be restored
+  // on next launch. Cheap; called whenever tabs change.
+  void SaveSessionState();
   // Frameless window controls.
   CefRefPtr<CefPanel> caption_spacer_;  // flexible drag area
   CefRefPtr<CefLabelButton> minimize_button_;

@@ -476,8 +476,31 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
   // Push the theme colors into the freshly-built view hierarchy.
   window_->ThemeChanged();
 
-  // First tab.
-  CreateTab(pending_initial_url_, /*select=*/true);
+  // First tab(s). If a previous session was saved and the caller didn't ask
+  // for a specific URL (i.e. a normal launch), restore the saved tabs.
+  bool restored = false;
+  if (pending_initial_url_ == GetNewTabURL()) {
+    std::vector<std::string> saved = OpenNyxStore::Get()->GetSessionTabs();
+    // Don't bother restoring a single new-tab page.
+    const bool trivial =
+        saved.empty() ||
+        (saved.size() == 1 && (saved[0] == GetNewTabURL() ||
+                               saved[0] == "opennyx://newtab"));
+    if (!trivial) {
+      size_t active = OpenNyxStore::Get()->GetSessionActiveIndex();
+      for (size_t i = 0; i < saved.size(); ++i) {
+        CreateTab(saved[i], /*select=*/false);
+      }
+      if (active >= saved.size()) {
+        active = 0;
+      }
+      SelectTab(active);
+      restored = true;
+    }
+  }
+  if (!restored) {
+    CreateTab(pending_initial_url_, /*select=*/true);
+  }
   pending_initial_url_.clear();
 
   window_->Show();
@@ -1051,6 +1074,24 @@ void BrowserWindow::ZoomActiveTab(int delta) {
   host->SetZoomLevel(level);
 }
 
+void BrowserWindow::SaveSessionState() {
+  CEF_REQUIRE_UI_THREAD();
+  std::vector<std::string> urls;
+  urls.reserve(tabs_.size());
+  for (const auto& t : tabs_) {
+    std::string url;
+    if (t.browser_view && t.browser_view->GetBrowser() &&
+        t.browser_view->GetBrowser()->GetMainFrame()) {
+      url = t.browser_view->GetBrowser()->GetMainFrame()->GetURL().ToString();
+    }
+    if (url.empty()) {
+      url = GetNewTabURL();
+    }
+    urls.push_back(url);
+  }
+  OpenNyxStore::Get()->SaveSession(urls, active_tab_);
+}
+
 void BrowserWindow::DragPoll(int seq) {
   CEF_REQUIRE_UI_THREAD();
 #if defined(_WIN32)
@@ -1196,6 +1237,8 @@ void BrowserWindow::OnBrowserAddressChange(CefRefPtr<CefBrowser> browser,
     SetAddressBarText(ShouldHideUrlInAddressBar(spec) ? "" : spec);
   }
   UpdateChrome();
+  // Persist the session whenever a tab navigates somewhere new.
+  SaveSessionState();
 }
 
 void BrowserWindow::OnBrowserLoadingStateChange(CefRefPtr<CefBrowser> browser,
@@ -1452,6 +1495,8 @@ void BrowserWindow::RemoveTabAt(size_t index) {
     SelectTab(active_tab_);
   }
   window_->InvalidateLayout();
+  // Persist the smaller tab set so a closed tab doesn't come back on restore.
+  SaveSessionState();
 }
 
 void BrowserWindow::SelectTab(size_t index) {

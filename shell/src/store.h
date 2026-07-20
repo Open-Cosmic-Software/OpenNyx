@@ -90,6 +90,15 @@ class OpenNyxStore {
   std::vector<DownloadEntry> GetDownloads();
   void ClearDownloads();
 
+  // ---- Session (open tabs, for restore-on-startup) ----
+  // Persists the list of currently-open tab URLs (in tab order). Called by the
+  // browser window whenever tabs change.
+  void SaveSession(const std::vector<std::string>& tab_urls,
+                   size_t active_index);
+  // Returns the previously-saved open-tab URLs (empty if none).
+  std::vector<std::string> GetSessionTabs();
+  size_t GetSessionActiveIndex();
+
   // ---- Bulk ----
   // Clears history + downloads (leaves bookmarks + config intact). Cookies /
   // cache are cleared separately by the browser layer.
@@ -116,6 +125,8 @@ class OpenNyxStore {
   std::vector<HistoryEntry> history_;    // newest last.
   std::vector<Bookmark> bookmarks_;      // newest last.
   std::vector<DownloadEntry> downloads_;  // newest last.
+  std::vector<std::string> session_tabs_;  // open tab URLs (tab order).
+  size_t session_active_ = 0;
 };
 
 #endif  // OPENNYX_SHELL_SRC_STORE_H_

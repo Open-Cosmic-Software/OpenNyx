@@ -212,6 +212,53 @@ void OpenNyxStore::LoadLocked() {
       }
     }
   }
+
+  // ---- session (open tabs) ----
+  {
+    const std::string raw = ReadFile(PathFor("session.json"));
+    if (!raw.empty()) {
+      json j = json::parse(raw, nullptr, false);
+      if (j.is_object()) {
+        session_active_ = j.value("active", (size_t)0);
+        const auto& tabs = j["tabs"];
+        if (tabs.is_array()) {
+          for (const auto& t : tabs) {
+            if (t.is_string()) {
+              session_tabs_.push_back(t.get<std::string>());
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void OpenNyxStore::SaveSession(const std::vector<std::string>& tab_urls,
+                               size_t active_index) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  session_tabs_ = tab_urls;
+  session_active_ = active_index;
+  json j;
+  j["active"] = active_index;
+  json arr = json::array();
+  for (const auto& u : tab_urls) {
+    arr.push_back(u);
+  }
+  j["tabs"] = arr;
+  WriteFileAtomic(PathFor("session.json"), j.dump(2));
+}
+
+std::vector<std::string> OpenNyxStore::GetSessionTabs() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  return session_tabs_;
+}
+
+size_t OpenNyxStore::GetSessionActiveIndex() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  return session_active_;
 }
 
 void OpenNyxStore::SaveConfigLocked() {
