@@ -500,6 +500,35 @@ std::string GetSharedChrome() {
   return std::string(kSharedCSS) + kSharedJS;
 }
 
+// ---- About ----
+std::string AboutPage() {
+  // NOTE: raw string literals do NOT process \x escapes, so emoji/UTF-8 are
+  // written as literal bytes here (the file is UTF-8).
+  const char* body = R"HTML(
+<div style="text-align:center;padding:40px 0 10px">
+  <div style="font-size:64px;line-height:1">🦞</div>
+  <h1 style="margin:16px 0 4px">OpenNyx</h1>
+  <p class="sub">A privacy-first, de-googled browser for developers.</p>
+</div>
+<div class="card">
+  <div class="row"><div class="grow"><div class="t">Engine</div>
+    <div class="u">Chromium via CEF (de-googled at runtime)</div></div></div>
+  <div class="row"><div class="grow"><div class="t">Default search</div>
+    <div class="u">Brave Search</div></div></div>
+  <div class="row"><div class="grow"><div class="t">Secure DNS</div>
+    <div class="u">DNS-over-HTTPS via Quad9 (Swiss non-profit)</div></div></div>
+  <div class="row"><div class="grow"><div class="t">License</div>
+    <div class="u">MIT · Open Cosmic Software</div></div></div>
+</div>
+<p class="sub" style="text-align:center;margin-top:20px">
+  Made with 🦞 by Nyx ·
+  <a href="https://github.com/Open-Cosmic-Software/OpenNyx">github.com/Open-Cosmic-Software/OpenNyx</a>
+</p>
+)HTML";
+  const char* script = "";
+  return Doc("About", "about", body, script);
+}
+
 std::string GetOpenNyxPageHTML(const std::string& page) {
   if (page == "history") {
     return HistoryPage();
@@ -512,6 +541,9 @@ std::string GetOpenNyxPageHTML(const std::string& page) {
   }
   if (page == "settings") {
     return SettingsPage();
+  }
+  if (page == "about") {
+    return AboutPage();
   }
   return NewTabPage();
 }

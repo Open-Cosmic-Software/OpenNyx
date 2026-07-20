@@ -67,6 +67,8 @@ enum ViewID {
   ID_STAR_BUTTON,
   ID_SHIELD_BUTTON,
   ID_MENU_BUTTON,
+  ID_APP_MENU_BUTTON,   // top-left OpenNyx logo menu (Opera-style).
+  ID_DOWNLOADS_BUTTON,  // toolbar downloads menu.
   // Frameless window controls (drawn by OpenNyx in the tab strip).
   ID_CAPTION_SPACER,
   ID_MINIMIZE_BUTTON,
@@ -95,6 +97,29 @@ enum CommandID {
   CMD_SETTINGS,
   CMD_MOVE_TAB_LEFT,
   CMD_MOVE_TAB_RIGHT,
+  CMD_ZOOM_IN,
+  CMD_ZOOM_OUT,
+  CMD_ZOOM_RESET,
+};
+
+// ---- App-menu / downloads-menu command ids (CefMenuModel) ----
+// Kept well above the accelerator ids to avoid any overlap.
+enum AppMenuCommandID {
+  MENU_NEW_TAB = 100,
+  MENU_HISTORY,
+  MENU_BOOKMARKS,
+  MENU_DOWNLOADS,
+  MENU_SETTINGS,
+  MENU_ZOOM_IN,
+  MENU_ZOOM_OUT,
+  MENU_ZOOM_RESET,
+  MENU_ABOUT,
+  // Downloads dropdown: open a specific recent download / open the folder /
+  // open the full downloads page. Per-item ids start at MENU_DL_ITEM_FIRST.
+  MENU_DL_OPEN_FOLDER = 130,
+  MENU_DL_SEE_ALL,
+  MENU_DL_CLEAR,
+  MENU_DL_ITEM_FIRST = 140,  // + index into the recent-downloads snapshot.
 };
 
 // ---- Windows virtual key codes (avoid pulling in windows.h here) ----
@@ -108,7 +133,11 @@ constexpr int kVK_LEFT = 0x25;
 constexpr int kVK_RIGHT = 0x27;
 constexpr int kVK_PRIOR = 0x21;  // Page Up.
 constexpr int kVK_NEXT = 0x22;   // Page Down.
-constexpr int kVK_OEM_COMMA = 0xBC;  // ',' key.
+constexpr int kVK_OEM_COMMA = 0xBC;    // ',' key.
+constexpr int kVK_OEM_PLUS = 0xBB;     // '=/+' key (main row).
+constexpr int kVK_OEM_MINUS = 0xBD;    // '-/_' key (main row).
+constexpr int kVK_ADD = 0x6B;          // numpad '+'.
+constexpr int kVK_SUBTRACT = 0x6D;     // numpad '-'.
 
 // Drag-to-reorder tuning.
 // Horizontal cursor travel (DIP) before a press turns into a drag. Keeps
@@ -605,6 +634,15 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window, int command_id) {
         MoveTab(active_tab_, active_tab_ + 1);
       }
       return true;
+    case CMD_ZOOM_IN:
+      ZoomActiveTab(1);
+      return true;
+    case CMD_ZOOM_OUT:
+      ZoomActiveTab(-1);
+      return true;
+    case CMD_ZOOM_RESET:
+      ZoomActiveTab(0);
+      return true;
     default:
       return false;
   }
@@ -785,9 +823,6 @@ void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
       // Show settings (privacy dashboard) when the shield is clicked.
       CreateTab("opennyx://settings", /*select=*/true);
       return;
-    case ID_MENU_BUTTON:
-      CreateTab("opennyx://settings", /*select=*/true);
-      return;
     case ID_MINIMIZE_BUTTON:
       if (window_) {
         window_->Minimize();
@@ -865,6 +900,154 @@ void BrowserWindow::OnButtonStateChanged(CefRefPtr<CefButton> button) {
                      base::BindOnce(&BrowserWindow::DragPoll, this, seq),
                      kDragPollIntervalMs);
 #endif
+}
+
+// ---- CefMenuButtonDelegate ----
+
+void BrowserWindow::OnMenuButtonPressed(
+    CefRefPtr<CefMenuButton> menu_button,
+    const CefPoint& screen_point,
+    CefRefPtr<CefMenuButtonPressedLock> button_pressed_lock) {
+  CEF_REQUIRE_UI_THREAD();
+  const int id = menu_button->GetID();
+
+  if (id == ID_APP_MENU_BUTTON) {
+    // Opera-style main menu.
+    CefRefPtr<CefMenuModel> m = CefMenuModel::CreateMenuModel(this);
+    m->AddItem(MENU_NEW_TAB, "New tab\tCtrl+T");
+    m->AddSeparator();
+    m->AddItem(MENU_HISTORY, "History\tCtrl+H");
+    m->AddItem(MENU_BOOKMARKS, "Bookmarks");
+    m->AddItem(MENU_DOWNLOADS, "Downloads\tCtrl+J");
+    m->AddSeparator();
+    m->AddItem(MENU_ZOOM_IN, "Zoom in\tCtrl++");
+    m->AddItem(MENU_ZOOM_OUT, "Zoom out\tCtrl+-");
+    m->AddItem(MENU_ZOOM_RESET, "Reset zoom\tCtrl+0");
+    m->AddSeparator();
+    m->AddItem(MENU_SETTINGS, "Settings\tCtrl+,");
+    m->AddItem(MENU_ABOUT, "About OpenNyx");
+    menu_button->ShowMenu(m, screen_point, CEF_MENU_ANCHOR_TOPLEFT);
+    return;
+  }
+
+  if (id == ID_DOWNLOADS_BUTTON) {
+    // Recent-downloads dropdown overlay.
+    CefRefPtr<CefMenuModel> m = CefMenuModel::CreateMenuModel(this);
+    downloads_menu_snapshot_ = OpenNyxStore::Get()->GetDownloads();
+    // Show the most recent items first (GetDownloads is newest-last).
+    int shown = 0;
+    for (auto it = downloads_menu_snapshot_.rbegin();
+         it != downloads_menu_snapshot_.rend() && shown < 8; ++it, ++shown) {
+      const DownloadEntry& d = *it;
+      std::string label = d.filename;
+      if (label.size() > 40) {
+        label = label.substr(0, 37) + "...";
+      }
+      if (!d.complete) {
+        label += "  (" + std::to_string(d.percent) + "%)";
+      } else if (d.canceled) {
+        label += "  (canceled)";
+      }
+      // Command id encodes the index into the snapshot (newest-first order).
+      m->AddItem(MENU_DL_ITEM_FIRST + shown, label);
+    }
+    if (shown == 0) {
+      m->AddItem(0, "No downloads yet");
+      m->SetEnabled(0, false);
+    }
+    m->AddSeparator();
+    m->AddItem(MENU_DL_OPEN_FOLDER, "Open downloads folder");
+    m->AddItem(MENU_DL_SEE_ALL, "See all downloads\tCtrl+J");
+    if (shown > 0) {
+      m->AddItem(MENU_DL_CLEAR, "Clear list");
+    }
+    menu_button->ShowMenu(m, screen_point, CEF_MENU_ANCHOR_TOPRIGHT);
+    return;
+  }
+}
+
+// ---- CefMenuModelDelegate ----
+
+void BrowserWindow::ExecuteCommand(CefRefPtr<CefMenuModel> menu_model,
+                                   int command_id,
+                                   cef_event_flags_t event_flags) {
+  CEF_REQUIRE_UI_THREAD();
+  switch (command_id) {
+    case MENU_NEW_TAB:
+      CreateTab(GetNewTabURL(), /*select=*/true);
+      return;
+    case MENU_HISTORY:
+      CreateTab("opennyx://history", /*select=*/true);
+      return;
+    case MENU_BOOKMARKS:
+      CreateTab("opennyx://bookmarks", /*select=*/true);
+      return;
+    case MENU_DOWNLOADS:
+    case MENU_DL_SEE_ALL:
+      CreateTab("opennyx://downloads", /*select=*/true);
+      return;
+    case MENU_SETTINGS:
+      CreateTab("opennyx://settings", /*select=*/true);
+      return;
+    case MENU_ABOUT:
+      CreateTab("opennyx://about", /*select=*/true);
+      return;
+    case MENU_ZOOM_IN:
+      ZoomActiveTab(1);
+      return;
+    case MENU_ZOOM_OUT:
+      ZoomActiveTab(-1);
+      return;
+    case MENU_ZOOM_RESET:
+      ZoomActiveTab(0);
+      return;
+    case MENU_DL_OPEN_FOLDER:
+      OpenDownloadsFolder();
+      return;
+    case MENU_DL_CLEAR:
+      OpenNyxStore::Get()->ClearDownloads();
+      return;
+    default:
+      break;
+  }
+  // Per-download item: open that file.
+  if (command_id >= MENU_DL_ITEM_FIRST) {
+    const size_t idx = static_cast<size_t>(command_id - MENU_DL_ITEM_FIRST);
+    // downloads_menu_snapshot_ is newest-last; the menu listed newest-first, so
+    // index 0 = last element.
+    if (idx < downloads_menu_snapshot_.size()) {
+      const DownloadEntry& d =
+          downloads_menu_snapshot_[downloads_menu_snapshot_.size() - 1 - idx];
+      if (d.complete && !d.canceled && !d.full_path.empty()) {
+        OpenPath(d.full_path);
+      } else {
+        CreateTab("opennyx://downloads", /*select=*/true);
+      }
+    }
+  }
+}
+
+void BrowserWindow::ZoomActiveTab(int delta) {
+  CEF_REQUIRE_UI_THREAD();
+  CefRefPtr<CefBrowser> browser = ActiveBrowser();
+  if (!browser) {
+    return;
+  }
+  CefRefPtr<CefBrowserHost> host = browser->GetHost();
+  if (!host) {
+    return;
+  }
+  if (delta == 0) {
+    host->SetZoomLevel(0.0);  // 0 = 100%.
+    return;
+  }
+  // CEF zoom is logarithmic; Chrome uses ~1.2x per step => ln(1.2) ~= 0.1823.
+  double level = host->GetZoomLevel();
+  level += (delta > 0 ? 0.5 : -0.5);
+  // Clamp to a sane range (roughly 25% .. 500%).
+  if (level > 7.5) level = 7.5;
+  if (level < -7.5) level = -7.5;
+  host->SetZoomLevel(level);
 }
 
 void BrowserWindow::DragPoll(int seq) {
@@ -1394,6 +1577,19 @@ void BrowserWindow::BuildUI() {
   strip_layout.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
   tab_strip_->SetToBoxLayout(strip_layout);
 
+  // -- OpenNyx logo menu (top-left, Opera style) --
+  // A menu button showing the OpenNyx lobster glyph; opens the main app menu
+  // (new tab, history, bookmarks, downloads, zoom, settings, about).
+  app_menu_button_ = CefMenuButton::CreateMenuButton(this, "\xF0\x9F\xA6\x9E");
+  app_menu_button_->SetID(ID_APP_MENU_BUTTON);
+  app_menu_button_->SetFontList("Segoe UI, 15px");
+  app_menu_button_->SetInkDropEnabled(true);
+  app_menu_button_->SetFocusable(false);
+  app_menu_button_->SetMinimumSize(CefSize(38, 30));
+  app_menu_button_->SetMaximumSize(CefSize(38, 30));
+  app_menu_button_->SetTooltipText("OpenNyx menu");
+  tab_strip_->AddChildView(app_menu_button_);
+
   new_tab_button_ = CefLabelButton::CreateLabelButton(this, "+");
   new_tab_button_->SetID(ID_NEW_TAB_BUTTON);
   new_tab_button_->SetFontList("Segoe UI, 16px");
@@ -1500,8 +1696,20 @@ void BrowserWindow::BuildUI() {
   shield_button_->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorTextDim);
   star_button_ = make_nav_button("\xE2\x98\x86", ID_STAR_BUTTON,
                                  "Bookmark this page (Ctrl+D)");
-  menu_button_ = make_nav_button("\xE2\x98\xB0", ID_MENU_BUTTON,
-                                 "Menu / Settings (Ctrl+,)");
+  // Downloads menu button (where the old hamburger menu used to be): a menu
+  // button showing a down-arrow that opens the recent-downloads dropdown.
+  downloads_button_ =
+      CefMenuButton::CreateMenuButton(this, "\xE2\xAC\x87");  // U+2B07
+  downloads_button_->SetID(ID_DOWNLOADS_BUTTON);
+  downloads_button_->SetFontList("Segoe UI, 15px");
+  downloads_button_->SetInkDropEnabled(true);
+  downloads_button_->SetFocusable(false);
+  downloads_button_->SetMinimumSize(CefSize(34, 30));
+  downloads_button_->SetMaximumSize(CefSize(34, 30));
+  downloads_button_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+  downloads_button_->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorTextDim);
+  downloads_button_->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorText);
+  downloads_button_->SetTooltipText("Downloads (Ctrl+J)");
 
   toolbar_->AddChildView(back_button_);
   toolbar_->AddChildView(forward_button_);
@@ -1510,7 +1718,7 @@ void BrowserWindow::BuildUI() {
   toolbar_->AddChildView(address_bar_);
   toolbar_->AddChildView(shield_button_);
   toolbar_->AddChildView(star_button_);
-  toolbar_->AddChildView(menu_button_);
+  toolbar_->AddChildView(downloads_button_);
   tb_layout->SetFlexForView(address_bar_, 1);
 
   window_->AddChildView(tab_strip_);
@@ -1542,6 +1750,14 @@ void BrowserWindow::AddAccelerators() {
                           true);
   window_->SetAccelerator(CMD_MOVE_TAB_RIGHT, kVK_NEXT, true, true, false,
                           true);
+  // Zoom: Ctrl++ / Ctrl+- / Ctrl+0. Bind both the main-row and numpad keys for
+  // + and - so it works regardless of keyboard layout.
+  window_->SetAccelerator(CMD_ZOOM_IN, kVK_OEM_PLUS, false, true, false, true);
+  window_->SetAccelerator(CMD_ZOOM_IN, kVK_ADD, false, true, false, true);
+  window_->SetAccelerator(CMD_ZOOM_OUT, kVK_OEM_MINUS, false, true, false,
+                          true);
+  window_->SetAccelerator(CMD_ZOOM_OUT, kVK_SUBTRACT, false, true, false, true);
+  window_->SetAccelerator(CMD_ZOOM_RESET, '0', false, true, false, true);
 }
 
 CefRefPtr<CefBrowserView> BrowserWindow::ActiveBrowserView() {

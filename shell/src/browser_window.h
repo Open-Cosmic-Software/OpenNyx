@@ -9,17 +9,22 @@
 #include <vector>
 
 #include "include/cef_browser.h"
+#include "include/cef_menu_model.h"
+#include "include/cef_menu_model_delegate.h"
 #include "include/internal/cef_types_runtime.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_button_delegate.h"
 #include "include/views/cef_label_button.h"
+#include "include/views/cef_menu_button.h"
+#include "include/views/cef_menu_button_delegate.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_panel_delegate.h"
 #include "include/views/cef_textfield.h"
 #include "include/views/cef_textfield_delegate.h"
 #include "include/views/cef_window.h"
 #include "include/views/cef_window_delegate.h"
+#include "store.h"  // DownloadEntry
 
 // The main OpenNyx browser window: a CEF Views top-level window that owns
 //  * a tab strip (one button per tab + close buttons + new-tab button),
@@ -30,7 +35,9 @@
 class BrowserWindow : public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public CefTextfieldDelegate,
-                      public CefButtonDelegate {
+                      public CefButtonDelegate,
+                      public CefMenuButtonDelegate,
+                      public CefMenuModelDelegate {
  public:
   // Creates the singleton main window with an initial tab showing |url|
   // (empty = new-tab page).
@@ -151,6 +158,19 @@ class BrowserWindow : public CefWindowDelegate,
   // potential drag (see DragPoll below).
   void OnButtonStateChanged(CefRefPtr<CefButton> button) override;
 
+  // ---- CefMenuButtonDelegate ----
+  // The OpenNyx logo (top-left) and the downloads button are menu buttons that
+  // pop a CefMenuModel below themselves.
+  void OnMenuButtonPressed(
+      CefRefPtr<CefMenuButton> menu_button,
+      const CefPoint& screen_point,
+      CefRefPtr<CefMenuButtonPressedLock> button_pressed_lock) override;
+
+  // ---- CefMenuModelDelegate ----
+  void ExecuteCommand(CefRefPtr<CefMenuModel> menu_model,
+                      int command_id,
+                      cef_event_flags_t event_flags) override;
+
  private:
   BrowserWindow() = default;
 
@@ -214,7 +234,15 @@ class BrowserWindow : public CefWindowDelegate,
   CefRefPtr<CefTextfield> address_bar_;
   CefRefPtr<CefLabelButton> star_button_;    // bookmark toggle.
   CefRefPtr<CefLabelButton> shield_button_;  // blocked-request count.
-  CefRefPtr<CefLabelButton> menu_button_;    // opens settings.
+  CefRefPtr<CefMenuButton> app_menu_button_;   // top-left OpenNyx logo menu.
+  CefRefPtr<CefMenuButton> downloads_button_;  // toolbar downloads menu.
+  // Snapshot of downloads taken when the downloads dropdown is opened, so menu
+  // command ids can map back to a specific file (newest-last order).
+  std::vector<DownloadEntry> downloads_menu_snapshot_;
+
+  // Applies a zoom step to the active tab. delta = +1 (in), -1 (out), 0 (reset
+  // to 100%). Zoom uses CEF's logarithmic level: each step is ~1.2x.
+  void ZoomActiveTab(int delta);
   // Frameless window controls.
   CefRefPtr<CefPanel> caption_spacer_;  // flexible drag area
   CefRefPtr<CefLabelButton> minimize_button_;

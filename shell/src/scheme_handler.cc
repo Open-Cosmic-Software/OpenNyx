@@ -338,7 +338,7 @@ class OpenNyxSchemeHandlerFactory : public CefSchemeHandlerFactory {
     // Otherwise serve a page (default newtab).
     std::string page = p.host.empty() ? "newtab" : p.host;
     static const char* kPages[] = {"newtab", "history", "bookmarks",
-                                   "downloads", "settings"};
+                                   "downloads", "settings", "about"};
     bool known = false;
     for (const char* k : kPages) {
       if (page == k) {
