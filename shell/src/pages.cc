@@ -46,11 +46,15 @@ h1{font-size:26px;font-weight:640;margin:14px 0 4px}
 .row .grow .u{font-size:12px;color:var(--dim);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
 .row .meta{color:var(--dim2);font-size:12px;white-space:nowrap}
-input[type=text],input[type=search],input[type=url],select{
+input[type=text],input[type=search],input[type=url],input[type=password],
+input.in,select{
   background:var(--bg2);color:var(--text);border:1px solid var(--border2);
   border-radius:9px;padding:9px 12px;font-size:14px;outline:none;
   font-family:inherit}
 input:focus,select:focus{border-color:var(--accent)}
+input[type=file]{color:var(--dim);font-size:13px}
+.u{font-size:12.5px;color:var(--dim);line-height:1.5}
+.pw{font-family:monospace;letter-spacing:1px}
 .search{width:100%;margin:0 0 18px;padding:12px 15px;font-size:15px}
 button,.btn{background:var(--accent);color:#fff;border:0;border-radius:9px;
   padding:9px 16px;font-size:13.5px;font-weight:600;cursor:pointer;
@@ -368,6 +372,130 @@ setInterval(load,1200);
   return Doc("Downloads", "downloads", body, script);
 }
 
+// ---- Passwords ----
+std::string PasswordsPage() {
+  const char* body = R"HTML(
+<h1>Passwords</h1>
+<p class="sub">Your saved logins, encrypted at rest with Windows DPAPI
+(tied to your Windows account \xE2\x80\x94 the same protection Chrome and Opera use).</p>
+
+<div class="card" style="margin-bottom:16px">
+  <div style="font-weight:600;margin-bottom:6px">Import from another browser</div>
+  <div class="u" style="margin-bottom:10px">
+    In Chrome / Opera / Edge / Brave open
+    <b>Settings \xE2\x86\x92 Passwords \xE2\x86\x92 \xE2\x8B\xAF \xE2\x86\x92 Export passwords</b>,
+    save the CSV, then pick it here. In Firefox use
+    <b>about:logins \xE2\x86\x92 \xE2\x8B\xAF \xE2\x86\x92 Export Logins</b>.
+  </div>
+  <input type="file" id="csv" accept=".csv,text/csv" />
+  <button class="primary" id="importbtn" style="margin-left:8px">Import CSV</button>
+  <div class="u" id="impstatus" style="margin-top:8px"></div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div style="font-weight:600;margin-bottom:8px">Add a login manually</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <input class="in" id="a_origin" placeholder="https://example.com" style="flex:1;min-width:180px" />
+    <input class="in" id="a_user" placeholder="username or email" style="flex:1;min-width:140px" />
+    <input class="in" id="a_pass" type="password" placeholder="password" style="flex:1;min-width:140px" />
+    <button class="ghost" id="addbtn">Save</button>
+  </div>
+</div>
+
+<div style="display:flex;gap:10px;margin-bottom:14px">
+  <input class="in" id="filter" placeholder="Search logins\xE2\x80\xA6" style="flex:1" />
+  <button class="ghost" id="clr">Clear all</button>
+</div>
+<div class="card"><div id="list"><div class="empty">Loading\xE2\x80\xA6</div></div></div>
+)HTML";
+  const char* script = R"JS(
+let ALL=[];
+function esc2(s){return (s||'').replace(/"/g,'&quot;');}
+async function load(){
+  const r=await api('passwords');
+  ALL=r.items||[];
+  render();
+}
+function render(){
+  const q=(document.getElementById('filter').value||'').toLowerCase();
+  const list=document.getElementById('list');
+  const items=ALL.filter(p=>!q||(p.origin+' '+p.username).toLowerCase().includes(q));
+  if(!items.length){list.innerHTML='<div class="empty">No saved logins.</div>';return;}
+  list.innerHTML=items.map((p,i)=>
+    `<div class="row"><div class="grow">
+      <div class="t">${esc(p.origin)}</div>
+      <div class="u">${esc(p.username)}</div>
+      <div class="u"><span class="pw" data-i="${i}">\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2</span>
+        <button class="linkbtn" data-reveal="${i}">Show</button>
+        <button class="linkbtn" data-copy="${i}">Copy</button></div></div>
+      <button class="ghost mini" data-del-o="${esc2(p.origin)}" data-del-u="${esc2(p.username)}">Remove</button></div>`
+    ).join('');
+  list.querySelectorAll('[data-reveal]').forEach(b=>b.addEventListener('click',()=>{
+    const i=+b.getAttribute('data-reveal');const span=list.querySelector('.pw[data-i="'+i+'"]');
+    if(span.dataset.shown){span.textContent='\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2';delete span.dataset.shown;b.textContent='Show';}
+    else{span.textContent=items[i].password;span.dataset.shown='1';b.textContent='Hide';}}));
+  list.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>{
+    const i=+b.getAttribute('data-copy');navigator.clipboard&&navigator.clipboard.writeText(items[i].password);toast('Copied');}));
+  list.querySelectorAll('[data-del-o]').forEach(b=>b.addEventListener('click',async()=>{
+    await api('passwords/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({origin:b.getAttribute('data-del-o'),username:b.getAttribute('data-del-u')})});
+    toast('Removed');load();}));
+}
+document.getElementById('filter').addEventListener('input',render);
+document.getElementById('addbtn').addEventListener('click',async()=>{
+  const o=document.getElementById('a_origin').value.trim();
+  const u=document.getElementById('a_user').value.trim();
+  const p=document.getElementById('a_pass').value;
+  if(!o&&!u){toast('Enter a site + username');return;}
+  await api('passwords/add',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({origin:o,username:u,password:p})});
+  document.getElementById('a_origin').value='';document.getElementById('a_user').value='';
+  document.getElementById('a_pass').value='';toast('Saved');load();});
+document.getElementById('clr').addEventListener('click',async()=>{
+  if(!confirm('Delete ALL saved logins?'))return;
+  await api('passwords/clear',{method:'POST'});toast('Cleared');load();});
+
+// --- CSV import ---
+// Robust-enough CSV line splitter that respects double-quoted fields.
+function parseCSV(text){
+  const rows=[];let row=[];let cur='';let q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=c;}
+    else{if(c==='"')q=true;
+      else if(c===','){row.push(cur);cur='';}
+      else if(c==='\n'){row.push(cur);rows.push(row);row=[];cur='';}
+      else if(c==='\r'){}
+      else cur+=c;}}
+  if(cur.length||row.length){row.push(cur);rows.push(row);}
+  return rows;
+}
+document.getElementById('importbtn').addEventListener('click',async()=>{
+  const f=document.getElementById('csv').files[0];
+  const st=document.getElementById('impstatus');
+  if(!f){st.textContent='Pick a CSV file first.';return;}
+  st.textContent='Reading\xE2\x80\xA6';
+  const text=await f.text();
+  const rows=parseCSV(text);
+  if(rows.length<2){st.textContent='CSV looks empty.';return;}
+  const head=rows[0].map(h=>h.trim().toLowerCase());
+  // Chrome/Opera/Edge/Brave: name,url,username,password[,note]
+  // Firefox: url,username,password,... ("url" or "hostname").
+  const iUrl=head.findIndex(h=>h==='url'||h==='origin'||h==='hostname'||h==='login_uri');
+  const iUser=head.findIndex(h=>h==='username'||h==='login_username'||h==='user');
+  const iPass=head.findIndex(h=>h==='password'||h==='login_password'||h==='pass');
+  if(iUser<0||iPass<0){st.textContent='Could not find username/password columns in this CSV.';return;}
+  const items=[];
+  for(let r=1;r<rows.length;r++){const row=rows[r];if(!row.length||(row.length===1&&!row[0]))continue;
+    items.push({origin:iUrl>=0?(row[iUrl]||''):'',username:row[iUser]||'',password:row[iPass]||''});}
+  const res=await api('passwords/import',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items})});
+  st.textContent='Imported '+((res&&res.count)||0)+' logins.';
+  toast('Imported '+((res&&res.count)||0));load();});
+load();
+)JS";
+  return Doc("Passwords", "passwords", body, script);
+}
+
 // ---- Settings ----
 std::string SettingsPage() {
   const char* body = R"HTML(
@@ -541,6 +669,9 @@ std::string GetOpenNyxPageHTML(const std::string& page) {
   }
   if (page == "settings") {
     return SettingsPage();
+  }
+  if (page == "passwords") {
+    return PasswordsPage();
   }
   if (page == "about") {
     return AboutPage();

@@ -44,6 +44,15 @@ struct DownloadEntry {
   int64_t ts = 0;
 };
 
+// A saved login credential. In memory `password` is plaintext; on disk it is
+// stored encrypted (Windows DPAPI, tied to the OS user account).
+struct PasswordEntry {
+  std::string origin;    // site URL / origin, e.g. https://example.com
+  std::string username;  // login / e-mail
+  std::string password;  // plaintext IN MEMORY ONLY (encrypted at rest)
+  int64_t ts = 0;        // last saved, Unix epoch millis.
+};
+
 // Which search engine the address bar / new-tab box uses.
 struct AppConfig {
   std::string search_engine = "brave";  // brave|duckduckgo|mojeek|custom
@@ -90,6 +99,19 @@ class OpenNyxStore {
   std::vector<DownloadEntry> GetDownloads();
   void ClearDownloads();
 
+  // ---- Passwords (encrypted vault) ----
+  // Adds or updates a credential (matched by origin+username). Returns false
+  // only on hard failure.
+  bool AddPassword(const std::string& origin, const std::string& username,
+                   const std::string& password);
+  bool RemovePassword(const std::string& origin, const std::string& username);
+  // Decrypted credentials (most-recent first).
+  std::vector<PasswordEntry> GetPasswords();
+  void ClearPasswords();
+  // Imports many credentials at once (e.g. from a Chrome/Opera CSV export).
+  // Returns the number successfully added/updated.
+  int ImportPasswords(const std::vector<PasswordEntry>& entries);
+
   // ---- Session (open tabs, for restore-on-startup) ----
   // Persists the list of currently-open tab URLs (in tab order). Called by the
   // browser window whenever tabs change.
@@ -115,6 +137,7 @@ class OpenNyxStore {
   void SaveHistoryLocked();
   void SaveBookmarksLocked();
   void SaveDownloadsLocked();
+  void SavePasswordsLocked();
   std::string PathFor(const char* name);
 
   std::mutex mutex_;
@@ -127,6 +150,8 @@ class OpenNyxStore {
   std::vector<DownloadEntry> downloads_;  // newest last.
   std::vector<std::string> session_tabs_;  // open tab URLs (tab order).
   size_t session_active_ = 0;
+  std::vector<PasswordEntry> passwords_;   // decrypted in memory, newest last.
+  bool passwords_loaded_ = false;
 };
 
 #endif  // OPENNYX_SHELL_SRC_STORE_H_

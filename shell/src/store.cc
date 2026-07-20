@@ -24,9 +24,111 @@
 
 #include "third_party/json/json.hpp"
 
+#if defined(_WIN32)
+#include <windows.h>
+#include <wincrypt.h>  // DPAPI: CryptProtectData / CryptUnprotectData.
+#endif
+
 using nlohmann::json;
 
 namespace {
+
+// Base64 (standard alphabet) for storing DPAPI ciphertext inside JSON.
+const char kB64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string Base64Encode(const std::string& in) {
+  std::string out;
+  out.reserve(((in.size() + 2) / 3) * 4);
+  size_t i = 0;
+  while (i + 2 < in.size()) {
+    uint32_t n = (uint8_t)in[i] << 16 | (uint8_t)in[i + 1] << 8 |
+                 (uint8_t)in[i + 2];
+    out += kB64[(n >> 18) & 63];
+    out += kB64[(n >> 12) & 63];
+    out += kB64[(n >> 6) & 63];
+    out += kB64[n & 63];
+    i += 3;
+  }
+  if (i < in.size()) {
+    uint32_t n = (uint8_t)in[i] << 16;
+    if (i + 1 < in.size()) n |= (uint8_t)in[i + 1] << 8;
+    out += kB64[(n >> 18) & 63];
+    out += kB64[(n >> 12) & 63];
+    out += (i + 1 < in.size()) ? kB64[(n >> 6) & 63] : '=';
+    out += '=';
+  }
+  return out;
+}
+
+std::string Base64Decode(const std::string& in) {
+  int rev[256];
+  for (int k = 0; k < 256; ++k) rev[k] = -1;
+  for (int k = 0; k < 64; ++k) rev[(uint8_t)kB64[k]] = k;
+  std::string out;
+  uint32_t buf = 0;
+  int bits = 0;
+  for (char c : in) {
+    if (c == '=' || c == '\n' || c == '\r') continue;
+    int v = rev[(uint8_t)c];
+    if (v < 0) continue;
+    buf = (buf << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out += static_cast<char>((buf >> bits) & 0xFF);
+    }
+  }
+  return out;
+}
+
+// Encrypts |plain| for the current OS user. On non-Windows (dev builds) this
+// falls back to a reversible obfuscation so the code still compiles/runs; the
+// real security guarantee is Windows-only (DPAPI, the same mechanism Chrome
+// and Opera use for their own password stores).
+std::string EncryptSecret(const std::string& plain) {
+#if defined(_WIN32)
+  DATA_BLOB in;
+  in.pbData = reinterpret_cast<BYTE*>(const_cast<char*>(plain.data()));
+  in.cbData = static_cast<DWORD>(plain.size());
+  DATA_BLOB out{};
+  if (CryptProtectData(&in, L"OpenNyx password vault", nullptr, nullptr,
+                       nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out)) {
+    std::string cipher(reinterpret_cast<char*>(out.pbData), out.cbData);
+    LocalFree(out.pbData);
+    return Base64Encode(cipher);
+  }
+  return std::string();  // Encryption failed -> store nothing.
+#else
+  std::string x = plain;
+  for (char& c : x) c ^= 0x5A;
+  return "OBF:" + Base64Encode(x);
+#endif
+}
+
+// Reverses EncryptSecret. Empty on failure.
+std::string DecryptSecret(const std::string& stored) {
+#if defined(_WIN32)
+  const std::string cipher = Base64Decode(stored);
+  DATA_BLOB in;
+  in.pbData = reinterpret_cast<BYTE*>(const_cast<char*>(cipher.data()));
+  in.cbData = static_cast<DWORD>(cipher.size());
+  DATA_BLOB out{};
+  if (CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr,
+                         CRYPTPROTECT_UI_FORBIDDEN, &out)) {
+    std::string plain(reinterpret_cast<char*>(out.pbData), out.cbData);
+    LocalFree(out.pbData);
+    return plain;
+  }
+  return std::string();
+#else
+  std::string s = stored;
+  if (s.rfind("OBF:", 0) == 0) s = s.substr(4);
+  std::string x = Base64Decode(s);
+  for (char& c : x) c ^= 0x5A;
+  return x;
+#endif
+}
 
 int64_t NowMillis() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -231,6 +333,27 @@ void OpenNyxStore::LoadLocked() {
       }
     }
   }
+
+  // ---- passwords (encrypted vault) ----
+  {
+    const std::string raw = ReadFile(PathFor("passwords.json"));
+    if (!raw.empty()) {
+      json arr = json::parse(raw, nullptr, false);
+      if (arr.is_array()) {
+        for (const auto& e : arr) {
+          if (!e.is_object()) continue;
+          PasswordEntry p;
+          p.origin = e.value("origin", "");
+          p.username = e.value("username", "");
+          p.ts = e.value("ts", (int64_t)0);
+          const std::string enc = e.value("password_enc", "");
+          p.password = enc.empty() ? "" : DecryptSecret(enc);
+          passwords_.push_back(p);
+        }
+      }
+    }
+    passwords_loaded_ = true;
+  }
 }
 
 void OpenNyxStore::SaveSession(const std::vector<std::string>& tab_urls,
@@ -259,6 +382,105 @@ size_t OpenNyxStore::GetSessionActiveIndex() {
   std::lock_guard<std::mutex> lock(mutex_);
   EnsureLoaded();
   return session_active_;
+}
+
+// ---- Passwords (encrypted vault) ----
+
+void OpenNyxStore::SavePasswordsLocked() {
+  json arr = json::array();
+  for (const auto& p : passwords_) {
+    const std::string enc =
+        p.password.empty() ? std::string() : EncryptSecret(p.password);
+    // If encryption failed we skip the secret but keep the record shape so the
+    // entry isn't silently lost; an empty password_enc reads back as "".
+    arr.push_back({{"origin", p.origin},
+                   {"username", p.username},
+                   {"password_enc", enc},
+                   {"ts", p.ts}});
+  }
+  WriteFileAtomic(PathFor("passwords.json"), arr.dump(2));
+}
+
+bool OpenNyxStore::AddPassword(const std::string& origin,
+                               const std::string& username,
+                               const std::string& password) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  // Upsert by (origin, username).
+  for (auto& p : passwords_) {
+    if (p.origin == origin && p.username == username) {
+      p.password = password;
+      p.ts = NowMillis();
+      SavePasswordsLocked();
+      return true;
+    }
+  }
+  PasswordEntry p;
+  p.origin = origin;
+  p.username = username;
+  p.password = password;
+  p.ts = NowMillis();
+  passwords_.push_back(p);
+  SavePasswordsLocked();
+  return true;
+}
+
+bool OpenNyxStore::RemovePassword(const std::string& origin,
+                                  const std::string& username) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  const size_t before = passwords_.size();
+  passwords_.erase(
+      std::remove_if(passwords_.begin(), passwords_.end(),
+                     [&](const PasswordEntry& p) {
+                       return p.origin == origin && p.username == username;
+                     }),
+      passwords_.end());
+  if (passwords_.size() != before) {
+    SavePasswordsLocked();
+    return true;
+  }
+  return false;
+}
+
+std::vector<PasswordEntry> OpenNyxStore::GetPasswords() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  std::vector<PasswordEntry> out(passwords_.rbegin(), passwords_.rend());
+  return out;
+}
+
+void OpenNyxStore::ClearPasswords() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  passwords_.clear();
+  SavePasswordsLocked();
+}
+
+int OpenNyxStore::ImportPasswords(const std::vector<PasswordEntry>& entries) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  EnsureLoaded();
+  int n = 0;
+  for (const auto& in : entries) {
+    if (in.origin.empty() && in.username.empty()) continue;
+    bool updated = false;
+    for (auto& p : passwords_) {
+      if (p.origin == in.origin && p.username == in.username) {
+        p.password = in.password;
+        p.ts = NowMillis();
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) {
+      PasswordEntry p = in;
+      if (p.ts == 0) p.ts = NowMillis();
+      passwords_.push_back(p);
+    }
+    ++n;
+  }
+  if (n > 0) SavePasswordsLocked();
+  return n;
 }
 
 void OpenNyxStore::SaveConfigLocked() {

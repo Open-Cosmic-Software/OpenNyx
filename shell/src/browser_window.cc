@@ -121,6 +121,7 @@ enum PaletteAction {
   PAL_HISTORY,
   PAL_BOOKMARKS,
   PAL_DOWNLOADS,
+  PAL_PASSWORDS,
   PAL_SETTINGS,
   PAL_ABOUT,
   PAL_RELOAD,
@@ -138,6 +139,7 @@ enum AppMenuCommandID {
   MENU_HISTORY,
   MENU_BOOKMARKS,
   MENU_DOWNLOADS,
+  MENU_PASSWORDS,
   MENU_SETTINGS,
   MENU_ZOOM_IN,
   MENU_ZOOM_OUT,
@@ -1132,6 +1134,7 @@ void BrowserWindow::OnMenuButtonPressed(
     m->AddItem(MENU_HISTORY, "History\tCtrl+H");
     m->AddItem(MENU_BOOKMARKS, "Bookmarks");
     m->AddItem(MENU_DOWNLOADS, "Downloads\tCtrl+J");
+    m->AddItem(MENU_PASSWORDS, "Passwords");
     m->AddSeparator();
     m->AddItem(MENU_ZOOM_IN, "Zoom in\tCtrl++");
     m->AddItem(MENU_ZOOM_OUT, "Zoom out\tCtrl+-");
@@ -1194,6 +1197,9 @@ void BrowserWindow::ExecuteCommand(CefRefPtr<CefMenuModel> menu_model,
       return;
     case MENU_BOOKMARKS:
       CreateTab("opennyx://bookmarks", /*select=*/true);
+      return;
+    case MENU_PASSWORDS:
+      CreateTab("opennyx://passwords", /*select=*/true);
       return;
     case MENU_DOWNLOADS:
     case MENU_DL_SEE_ALL:
@@ -1446,7 +1452,8 @@ void BrowserWindow::RefreshPaletteResults() {
   const QA actions[] = {
       {"New tab", PAL_NEW_TAB},        {"Open History", PAL_HISTORY},
       {"Open Bookmarks", PAL_BOOKMARKS}, {"Open Downloads", PAL_DOWNLOADS},
-      {"Open Settings", PAL_SETTINGS},   {"About OpenNyx", PAL_ABOUT},
+      {"Open Passwords", PAL_PASSWORDS}, {"Open Settings", PAL_SETTINGS},
+      {"About OpenNyx", PAL_ABOUT},
       {"Reload page", PAL_RELOAD},       {"Zoom in", PAL_ZOOM_IN},
       {"Zoom out", PAL_ZOOM_OUT},        {"Reset zoom", PAL_ZOOM_RESET},
   };
@@ -1512,6 +1519,9 @@ void BrowserWindow::ActivatePaletteRow(int row) {
       break;
     case PAL_DOWNLOADS:
       CreateTab("opennyx://downloads", true);
+      break;
+    case PAL_PASSWORDS:
+      CreateTab("opennyx://passwords", true);
       break;
     case PAL_SETTINGS:
       CreateTab("opennyx://settings", true);

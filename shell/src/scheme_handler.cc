@@ -251,6 +251,60 @@ CefRefPtr<CefResourceHandler> HandleApi(const std::string& endpoint,
     return JsonResponse(json{{"ok", true}});
   }
 
+  // ---- Passwords (encrypted vault) ----
+  if (endpoint == "passwords") {
+    auto items = store->GetPasswords();
+    json arr = json::array();
+    for (const auto& p : items) {
+      arr.push_back({{"origin", p.origin},
+                     {"username", p.username},
+                     {"password", p.password},
+                     {"ts", p.ts}});
+    }
+    return JsonResponse(json{{"items", arr}});
+  }
+
+  if (endpoint == "passwords/add" && method == "POST") {
+    json j = json::parse(body, nullptr, false);
+    bool ok = false;
+    if (j.is_object()) {
+      ok = store->AddPassword(j.value("origin", ""), j.value("username", ""),
+                              j.value("password", ""));
+    }
+    return JsonResponse(json{{"ok", ok}});
+  }
+
+  if (endpoint == "passwords/remove" && method == "POST") {
+    json j = json::parse(body, nullptr, false);
+    if (j.is_object()) {
+      store->RemovePassword(j.value("origin", ""), j.value("username", ""));
+    }
+    return JsonResponse(json{{"ok", true}});
+  }
+
+  if (endpoint == "passwords/clear" && method == "POST") {
+    store->ClearPasswords();
+    return JsonResponse(json{{"ok", true}});
+  }
+
+  // Bulk import from a Chrome/Opera/Edge/Brave/Firefox CSV export.
+  if (endpoint == "passwords/import" && method == "POST") {
+    json j = json::parse(body, nullptr, false);
+    std::vector<PasswordEntry> entries;
+    if (j.is_object() && j.contains("items") && j["items"].is_array()) {
+      for (const auto& it : j["items"]) {
+        if (!it.is_object()) continue;
+        PasswordEntry p;
+        p.origin = it.value("origin", "");
+        p.username = it.value("username", "");
+        p.password = it.value("password", "");
+        entries.push_back(p);
+      }
+    }
+    const int count = store->ImportPasswords(entries);
+    return JsonResponse(json{{"ok", true}, {"count", count}});
+  }
+
   if (endpoint == "downloads") {
     auto items = store->GetDownloads();
     json arr = json::array();
@@ -337,8 +391,9 @@ class OpenNyxSchemeHandlerFactory : public CefSchemeHandlerFactory {
 
     // Otherwise serve a page (default newtab).
     std::string page = p.host.empty() ? "newtab" : p.host;
-    static const char* kPages[] = {"newtab", "history", "bookmarks",
-                                   "downloads", "settings", "about"};
+    static const char* kPages[] = {"newtab",   "history",  "bookmarks",
+                                   "downloads", "settings", "passwords",
+                                   "about"};
     bool known = false;
     for (const char* k : kPages) {
       if (page == k) {
