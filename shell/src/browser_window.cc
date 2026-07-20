@@ -645,9 +645,15 @@ BrowserWindow::GetDelegateForPopupBrowserView(
     bool is_devtools) {
   DevLog(std::string("A. GetDelegateForPopupBrowserView is_devtools=") +
          (is_devtools ? "yes" : "no"));
-  // Give popups / DevTools their own lightweight delegate instead of this main
-  // window. Returning |this| (the default) would drive the DevTools view
-  // through the tab-strip/toolbar logic and crash.
+  // DevTools: let CEF build and own its DEFAULT window. Returning nullptr here
+  // (plus false from OnPopupBrowserViewCreated) hands the whole DevTools window
+  // to CEF, which is the robust path in Views mode. Wrapping DevTools in our
+  // custom Alloy popup window crashed inside CEF's DevTools finalization.
+  if (is_devtools) {
+    return nullptr;
+  }
+  // Regular window.open popups: own lightweight delegate (NOT this main window,
+  // whose tab/toolbar logic would crash the popup view).
   return new PopupBrowserViewDelegate();
 }
 
@@ -658,7 +664,12 @@ bool BrowserWindow::OnPopupBrowserViewCreated(
   DevLog(std::string("B. OnPopupBrowserViewCreated is_devtools=") +
          (is_devtools ? "yes" : "no") +
          " popup_view_null=" + (popup_browser_view ? "no" : "yes"));
-  // Host popups (window.open) and DevTools in their own top-level window.
+  // DevTools: return false so CEF creates and manages its own default window.
+  if (is_devtools) {
+    DevLog("C2. devtools -> letting CEF use its default window");
+    return false;
+  }
+  // Regular popups: host in our own top-level window.
   CefWindow::CreateTopLevelWindow(
       new PopupWindowDelegate(popup_browser_view));
   DevLog("C. CreateTopLevelWindow returned");
