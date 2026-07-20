@@ -128,6 +128,13 @@ enum AppMenuCommandID {
   MENU_DL_SEE_ALL,
   MENU_DL_CLEAR,
   MENU_DL_ITEM_FIRST = 140,  // + index into the recent-downloads snapshot.
+  // Tab context menu.
+  MENU_TAB_NEW = 160,
+  MENU_TAB_DUPLICATE,
+  MENU_TAB_RELOAD,
+  MENU_TAB_CLOSE,
+  MENU_TAB_CLOSE_OTHERS,
+  MENU_TAB_CLOSE_RIGHT,
 };
 
 // ---- Windows virtual key codes (avoid pulling in windows.h here) ----
@@ -520,6 +527,73 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
   if (CefRefPtr<CefBrowserView> view = ActiveBrowserView()) {
     view->RequestFocus();
   }
+
+#if defined(_WIN32)
+  // Start the persistent right-click poll for tab context menus (CEF Views
+  // buttons have no right-click callback).
+  CefPostDelayedTask(TID_UI, base::BindOnce(&BrowserWindow::RightClickPoll,
+                                            this),
+                     100);
+#endif
+}
+
+void BrowserWindow::RightClickPoll() {
+  CEF_REQUIRE_UI_THREAD();
+#if defined(_WIN32)
+  if (!window_) {
+    return;  // Window gone -> stop polling.
+  }
+  const bool down = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+  // Falling edge (was down, now up) = a right-click just completed.
+  if (rbutton_was_down_ && !down) {
+    POINT pt;
+    if (GetCursorPos(&pt)) {
+      const CefPoint dip = CefDisplay::ConvertScreenPointFromPixels(
+          CefPoint(pt.x, pt.y));
+      // Only react if the cursor is over a tab title button/panel.
+      for (const auto& t : tabs_) {
+        if (!t.tab_panel) {
+          continue;
+        }
+        const CefRect b = t.tab_panel->GetBoundsInScreen();
+        if (b.width > 0 && b.height > 0 && dip.x >= b.x &&
+            dip.x < b.x + b.width && dip.y >= b.y && dip.y < b.y + b.height) {
+          ShowTabContextMenu(t.id);
+          break;
+        }
+      }
+    }
+  }
+  rbutton_was_down_ = down;
+  // Re-arm the poll.
+  CefPostDelayedTask(TID_UI, base::BindOnce(&BrowserWindow::RightClickPoll,
+                                            this),
+                     60);
+#endif
+}
+
+void BrowserWindow::ShowTabContextMenu(int tab_id) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!window_) {
+    return;
+  }
+  context_menu_tab_id_ = tab_id;
+  CefRefPtr<CefMenuModel> m = CefMenuModel::CreateMenuModel(this);
+  m->AddItem(MENU_TAB_NEW, "New tab");
+  m->AddItem(MENU_TAB_DUPLICATE, "Duplicate tab");
+  m->AddItem(MENU_TAB_RELOAD, "Reload tab");
+  m->AddSeparator();
+  m->AddItem(MENU_TAB_CLOSE, "Close tab");
+  m->AddItem(MENU_TAB_CLOSE_OTHERS, "Close other tabs");
+  m->AddItem(MENU_TAB_CLOSE_RIGHT, "Close tabs to the right");
+#if defined(_WIN32)
+  POINT pt;
+  if (GetCursorPos(&pt)) {
+    const CefPoint dip =
+        CefDisplay::ConvertScreenPointFromPixels(CefPoint(pt.x, pt.y));
+    window_->ShowMenu(m, dip, CEF_MENU_ANCHOR_TOPLEFT);
+  }
+#endif
 }
 
 void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow> window,
@@ -1068,6 +1142,70 @@ void BrowserWindow::ExecuteCommand(CefRefPtr<CefMenuModel> menu_model,
     case MENU_DL_CLEAR:
       OpenNyxStore::Get()->ClearDownloads();
       return;
+    // ---- Tab context menu ----
+    case MENU_TAB_NEW:
+      CreateTab(GetNewTabURL(), /*select=*/true);
+      return;
+    case MENU_TAB_DUPLICATE: {
+      // Duplicate the right-clicked tab's URL into a new tab.
+      for (const auto& t : tabs_) {
+        if (t.id == context_menu_tab_id_ && t.browser_view &&
+            t.browser_view->GetBrowser() &&
+            t.browser_view->GetBrowser()->GetMainFrame()) {
+          const std::string url =
+              t.browser_view->GetBrowser()->GetMainFrame()->GetURL().ToString();
+          CreateTab(url.empty() ? GetNewTabURL() : url, /*select=*/true);
+          break;
+        }
+      }
+      return;
+    }
+    case MENU_TAB_RELOAD:
+      for (const auto& t : tabs_) {
+        if (t.id == context_menu_tab_id_ && t.browser_view &&
+            t.browser_view->GetBrowser()) {
+          t.browser_view->GetBrowser()->Reload();
+          break;
+        }
+      }
+      return;
+    case MENU_TAB_CLOSE:
+      CefPostTask(TID_UI, base::BindOnce(&BrowserWindow::DestroyTabById, this,
+                                         context_menu_tab_id_));
+      return;
+    case MENU_TAB_CLOSE_OTHERS: {
+      // Collect ids of all tabs except the target, then close them.
+      std::vector<int> ids;
+      for (const auto& t : tabs_) {
+        if (t.id != context_menu_tab_id_) {
+          ids.push_back(t.id);
+        }
+      }
+      for (int id : ids) {
+        CefPostTask(TID_UI, base::BindOnce(&BrowserWindow::DestroyTabById, this,
+                                           id));
+      }
+      return;
+    }
+    case MENU_TAB_CLOSE_RIGHT: {
+      // Find the target index, close everything to its right.
+      size_t target = tabs_.size();
+      for (size_t i = 0; i < tabs_.size(); ++i) {
+        if (tabs_[i].id == context_menu_tab_id_) {
+          target = i;
+          break;
+        }
+      }
+      std::vector<int> ids;
+      for (size_t i = target + 1; i < tabs_.size(); ++i) {
+        ids.push_back(tabs_[i].id);
+      }
+      for (int id : ids) {
+        CefPostTask(TID_UI, base::BindOnce(&BrowserWindow::DestroyTabById, this,
+                                           id));
+      }
+      return;
+    }
     default:
       break;
   }

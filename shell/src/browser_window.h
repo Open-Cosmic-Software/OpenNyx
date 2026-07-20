@@ -256,6 +256,14 @@ class BrowserWindow : public CefWindowDelegate,
   // on next launch. Cheap; called whenever tabs change.
   void SaveSessionState();
 
+  // ---- Tab context menu (right-click) ----
+  // CEF Views buttons expose no right-click callback, so we poll the OS right
+  // mouse button; on a right-press over a tab we open a context menu.
+  void RightClickPoll();
+  void ShowTabContextMenu(int tab_id);
+  int context_menu_tab_id_ = -1;  // tab the context menu currently targets.
+  bool rbutton_was_down_ = false;  // edge detection for the right mouse button.
+
   // ---- Find-in-page ----
   void ShowFindBar();
   void HideFindBar();
