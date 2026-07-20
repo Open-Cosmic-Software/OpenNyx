@@ -182,6 +182,10 @@ constexpr int kDragStartThresholdDip = 8;
 // Cursor poll interval while a tab is pressed (~60 fps).
 constexpr int kDragPollIntervalMs = 16;
 
+// Number of non-tab views at the start of the tab strip (the OpenNyx menu
+// button). Tab k therefore sits at strip-child-index k + this.
+constexpr int kTabStripLeadingViews = 1;
+
 // ---- Dark theme palette ----
 // A cohesive, slightly blue-tinted charcoal theme with a purple accent that
 // matches the OpenNyx wordmark on the new-tab page.
@@ -327,6 +331,18 @@ CefRefPtr<CefImage> GetAppIconImage() {
   if (!image) {
     image = CefImage::CreateImage();
     image->AddPNG(1.0f, kOpenNyxIconPng, kOpenNyxIconPngSize);
+  }
+  return image;
+}
+
+// Same PNG, but registered at a high scale factor so its logical (DIP) size is
+// small (~18px) — used for the toolbar/tab-strip menu button. The source PNG is
+// 256x256; scale 14.0 -> ~18 DIP.
+CefRefPtr<CefImage> GetAppMenuIconImage() {
+  static CefRefPtr<CefImage> image;
+  if (!image) {
+    image = CefImage::CreateImage();
+    image->AddPNG(14.0f, kOpenNyxIconPng, kOpenNyxIconPngSize);
   }
   return image;
 }
@@ -1671,15 +1687,16 @@ void BrowserWindow::MoveTab(size_t from, size_t to) {
   }
 
   // Keep the tab vector and the strip's child order in lock-step. Tab-vector
-  // index k corresponds to strip child index k (tabs occupy the first
-  // GetChildViewCount() slots before the + button / spacer / window
-  // controls), and both ReorderChildView and erase+insert place the moved
-  // element at final index |to|.
+  // index k corresponds to strip child index k + kTabStripLeadingViews (the
+  // leading OpenNyx menu button occupies strip index 0; tabs follow, then the
+  // + button / caption spacer / window controls). Both ReorderChildView and
+  // erase+insert place the moved element at final index |to|.
   Tab tab = tabs_[from];
   tabs_.erase(tabs_.begin() + from);
   tabs_.insert(tabs_.begin() + to, tab);
   if (tab_strip_ && tab.tab_panel) {
-    tab_strip_->ReorderChildView(tab.tab_panel, static_cast<int>(to));
+    tab_strip_->ReorderChildView(tab.tab_panel,
+                                 static_cast<int>(to) + kTabStripLeadingViews);
     tab_strip_->InvalidateLayout();
   }
 
@@ -1849,7 +1866,11 @@ void BrowserWindow::CreateTab(const std::string& url, bool select) {
   }
   tabs_.insert(tabs_.begin() + insert_index, tab);
   if (tab_strip_) {
-    tab_strip_->AddChildViewAt(tab.tab_panel, static_cast<int>(insert_index));
+    // The OpenNyx menu button occupies strip-child-index 0, so tab k lives at
+    // strip-child-index k + kTabStripLeadingViews.
+    tab_strip_->AddChildViewAt(
+        tab.tab_panel,
+        static_cast<int>(insert_index) + kTabStripLeadingViews);
   }
 
   // Browser views stack in the content area; only the active one is visible.
@@ -2115,14 +2136,21 @@ void BrowserWindow::BuildUI() {
   // -- OpenNyx logo menu (top-left, Opera style) --
   // A menu button showing the OpenNyx lobster glyph; opens the main app menu
   // (new tab, history, bookmarks, downloads, zoom, settings, about).
-  app_menu_button_ = CefMenuButton::CreateMenuButton(this, "\xF0\x9F\xA6\x9E");
+  // Empty label: the OpenNyx logo is shown as an image instead of a glyph.
+  app_menu_button_ = CefMenuButton::CreateMenuButton(this, "");
   app_menu_button_->SetID(ID_APP_MENU_BUTTON);
-  app_menu_button_->SetFontList("Segoe UI, 15px");
   app_menu_button_->SetInkDropEnabled(true);
   app_menu_button_->SetFocusable(false);
   app_menu_button_->SetMinimumSize(CefSize(38, 30));
   app_menu_button_->SetMaximumSize(CefSize(38, 30));
   app_menu_button_->SetTooltipText("OpenNyx menu");
+  // Show the real OpenNyx icon (freigestellt PNG) instead of a lobster emoji.
+  if (CefRefPtr<CefImage> icon = GetAppMenuIconImage()) {
+    app_menu_button_->SetImage(CEF_BUTTON_STATE_NORMAL, icon);
+    app_menu_button_->SetImage(CEF_BUTTON_STATE_HOVERED, icon);
+    app_menu_button_->SetImage(CEF_BUTTON_STATE_PRESSED, icon);
+    app_menu_button_->SetImage(CEF_BUTTON_STATE_DISABLED, icon);
+  }
   tab_strip_->AddChildView(app_menu_button_);
 
   new_tab_button_ = CefLabelButton::CreateLabelButton(this, "+");
