@@ -210,25 +210,6 @@ namespace {
 // User-defined context-menu command IDs must live between MENU_ID_USER_FIRST
 // (26500) and MENU_ID_USER_LAST.
 const int kMenuInspectElement = MENU_ID_USER_FIRST + 0;
-
-// TEMPORARY file tracer for the DevTools crash hunt. Writes to an ABSOLUTE
-// path so it is easy to find: %LOCALAPPDATA%\OpenNyx\opennyx-devtools.log
-// (falls back to %TEMP% then the CWD). Remove once fixed.
-void DevLog(const std::string& msg) {
-  std::string path;
-  if (const char* la = std::getenv("LOCALAPPDATA")) {
-    path = std::string(la) + "\\OpenNyx\\opennyx-devtools.log";
-  } else if (const char* tmp = std::getenv("TEMP")) {
-    path = std::string(tmp) + "\\opennyx-devtools.log";
-  } else {
-    path = "opennyx-devtools.log";
-  }
-  FILE* f = std::fopen(path.c_str(), "a");
-  if (f) {
-    std::fprintf(f, "%s\n", msg.c_str());
-    std::fclose(f);
-  }
-}
 }  // namespace
 
 void OpenNyxClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
@@ -252,25 +233,20 @@ bool OpenNyxClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
                                          EventFlags event_flags) {
   CEF_REQUIRE_UI_THREAD();
   if (command_id == kMenuInspectElement) {
-    DevLog("1. OnContextMenuCommand: Inspect clicked");
     if (!browser) {
-      DevLog("   ERROR: browser is null");
       return true;
     }
-    DevLog("2. browser ok, getting host");
     CefRefPtr<CefBrowserHost> host = browser->GetHost();
     if (!host) {
-      DevLog("   ERROR: host is null");
       return true;
     }
-    DevLog("3. host ok, HasDevTools=" +
-           std::string(host->HasDevTools() ? "yes" : "no"));
+    // Dedicated DevToolsClient (not our main client, whose handlers assume
+    // every browser is a tab). CEF owns the DevTools window (see the popup
+    // delegate for is_devtools).
     CefPoint inspect_at(params ? params->GetXCoord() : 0,
                         params ? params->GetYCoord() : 0);
-    DevLog("4. calling ShowDevTools with dedicated DevToolsClient");
     host->ShowDevTools(CefWindowInfo(), new DevToolsClient(),
                        CefBrowserSettings(), inspect_at);
-    DevLog("5. ShowDevTools returned (no crash in the call itself)");
     return true;
   }
   return false;

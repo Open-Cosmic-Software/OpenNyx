@@ -48,25 +48,6 @@ namespace {
 
 BrowserWindow* g_browser_window = nullptr;
 
-// TEMPORARY tracer for the DevTools crash hunt (mirrors the one in
-// opennyx_client.cc). Writes to %LOCALAPPDATA%\OpenNyx\opennyx-devtools.log.
-// Remove once fixed.
-void DevLog(const std::string& msg) {
-  std::string path;
-  if (const char* la = std::getenv("LOCALAPPDATA")) {
-    path = std::string(la) + "\\OpenNyx\\opennyx-devtools.log";
-  } else if (const char* tmp = std::getenv("TEMP")) {
-    path = std::string(tmp) + "\\opennyx-devtools.log";
-  } else {
-    path = "opennyx-devtools.log";
-  }
-  FILE* f = std::fopen(path.c_str(), "a");
-  if (f) {
-    std::fprintf(f, "%s\n", msg.c_str());
-    std::fclose(f);
-  }
-}
-
 
 // ---- View ids ----
 enum ViewID {
@@ -192,16 +173,10 @@ class PopupWindowDelegate : public CefWindowDelegate {
   PopupWindowDelegate& operator=(const PopupWindowDelegate&) = delete;
 
   void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    DevLog("D. PopupWindowDelegate::OnWindowCreated");
     window->SetTitle("OpenNyx");
-    DevLog("E. adding child view, view_null=" +
-           std::string(browser_view_ ? "no" : "yes"));
     window->AddChildView(browser_view_);
-    DevLog("F. showing window");
     window->Show();
-    DevLog("G. requesting focus");
     browser_view_->RequestFocus();
-    DevLog("H. popup window fully created");
   }
 
   void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
@@ -643,8 +618,6 @@ BrowserWindow::GetDelegateForPopupBrowserView(
     const CefBrowserSettings& settings,
     CefRefPtr<CefClient> client,
     bool is_devtools) {
-  DevLog(std::string("A. GetDelegateForPopupBrowserView is_devtools=") +
-         (is_devtools ? "yes" : "no"));
   // DevTools: let CEF build and own its DEFAULT window. Returning nullptr here
   // (plus false from OnPopupBrowserViewCreated) hands the whole DevTools window
   // to CEF, which is the robust path in Views mode. Wrapping DevTools in our
@@ -661,18 +634,13 @@ bool BrowserWindow::OnPopupBrowserViewCreated(
     CefRefPtr<CefBrowserView> browser_view,
     CefRefPtr<CefBrowserView> popup_browser_view,
     bool is_devtools) {
-  DevLog(std::string("B. OnPopupBrowserViewCreated is_devtools=") +
-         (is_devtools ? "yes" : "no") +
-         " popup_view_null=" + (popup_browser_view ? "no" : "yes"));
   // DevTools: return false so CEF creates and manages its own default window.
   if (is_devtools) {
-    DevLog("C2. devtools -> letting CEF use its default window");
     return false;
   }
   // Regular popups: host in our own top-level window.
   CefWindow::CreateTopLevelWindow(
       new PopupWindowDelegate(popup_browser_view));
-  DevLog("C. CreateTopLevelWindow returned");
   return true;
 }
 
