@@ -69,6 +69,13 @@ enum ViewID {
   ID_MENU_BUTTON,
   ID_APP_MENU_BUTTON,   // top-left OpenNyx logo menu (Opera-style).
   ID_DOWNLOADS_BUTTON,  // toolbar downloads menu.
+  // Find-in-page bar.
+  ID_FIND_BAR,
+  ID_FIND_FIELD,
+  ID_FIND_COUNT,
+  ID_FIND_PREV,
+  ID_FIND_NEXT,
+  ID_FIND_CLOSE,
   // Frameless window controls (drawn by OpenNyx in the tab strip).
   ID_CAPTION_SPACER,
   ID_MINIMIZE_BUTTON,
@@ -100,6 +107,7 @@ enum CommandID {
   CMD_ZOOM_IN,
   CMD_ZOOM_OUT,
   CMD_ZOOM_RESET,
+  CMD_FIND,
 };
 
 // ---- App-menu / downloads-menu command ids (CefMenuModel) ----
@@ -667,6 +675,9 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow> window, int command_id) {
     case CMD_ZOOM_RESET:
       ZoomActiveTab(0);
       return true;
+    case CMD_FIND:
+      ShowFindBar();
+      return true;
     default:
       return false;
   }
@@ -717,8 +728,25 @@ bool BrowserWindow::OnPopupBrowserViewCreated(
 bool BrowserWindow::OnKeyEvent(CefRefPtr<CefTextfield> textfield,
                                const CefKeyEvent& event) {
   CEF_REQUIRE_UI_THREAD();
-  if (textfield->GetID() != ID_ADDRESS_BAR ||
-      event.type != KEYEVENT_RAWKEYDOWN) {
+  if (event.type != KEYEVENT_RAWKEYDOWN) {
+    return false;
+  }
+
+  // Find bar: Enter = next, Shift+Enter = previous, Esc = close.
+  if (textfield->GetID() == ID_FIND_FIELD) {
+    if (event.windows_key_code == kVK_RETURN) {
+      const bool shift = (event.modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
+      DoFind(/*forward=*/!shift);
+      return true;
+    }
+    if (event.windows_key_code == kVK_ESCAPE) {
+      HideFindBar();
+      return true;
+    }
+    return false;
+  }
+
+  if (textfield->GetID() != ID_ADDRESS_BAR) {
     return false;
   }
 
@@ -846,6 +874,15 @@ void BrowserWindow::OnButtonPressed(CefRefPtr<CefButton> button) {
     case ID_SHIELD_BUTTON:
       // Show settings (privacy dashboard) when the shield is clicked.
       CreateTab("opennyx://settings", /*select=*/true);
+      return;
+    case ID_FIND_PREV:
+      DoFind(/*forward=*/false);
+      return;
+    case ID_FIND_NEXT:
+      DoFind(/*forward=*/true);
+      return;
+    case ID_FIND_CLOSE:
+      HideFindBar();
       return;
     case ID_MINIMIZE_BUTTON:
       if (window_) {
@@ -1090,6 +1127,73 @@ void BrowserWindow::SaveSessionState() {
     urls.push_back(url);
   }
   OpenNyxStore::Get()->SaveSession(urls, active_tab_);
+}
+
+// ---- Find-in-page ----
+
+void BrowserWindow::ShowFindBar() {
+  CEF_REQUIRE_UI_THREAD();
+  if (!find_bar_ || !find_field_) {
+    return;
+  }
+  find_bar_visible_ = true;
+  find_bar_->SetVisible(true);
+  if (find_count_) {
+    find_count_->SetText("");
+  }
+  window_->InvalidateLayout();
+  // Pre-select any existing text so the user can just type over it.
+  find_field_->RequestFocus();
+  find_field_->SelectAll(false);
+}
+
+void BrowserWindow::HideFindBar() {
+  CEF_REQUIRE_UI_THREAD();
+  if (!find_bar_) {
+    return;
+  }
+  find_bar_visible_ = false;
+  find_bar_->SetVisible(false);
+  if (CefRefPtr<CefBrowser> browser = ActiveBrowser()) {
+    browser->GetHost()->StopFinding(/*clearSelection=*/true);
+  }
+  window_->InvalidateLayout();
+  if (CefRefPtr<CefBrowserView> view = ActiveBrowserView()) {
+    view->RequestFocus();
+  }
+}
+
+void BrowserWindow::DoFind(bool forward) {
+  CEF_REQUIRE_UI_THREAD();
+  CefRefPtr<CefBrowser> browser = ActiveBrowser();
+  if (!browser || !find_field_) {
+    return;
+  }
+  const std::string text = find_field_->GetText().ToString();
+  if (text.empty()) {
+    browser->GetHost()->StopFinding(true);
+    if (find_count_) {
+      find_count_->SetText("");
+    }
+    return;
+  }
+  // findNext = keep the same search but advance to the next/prev match.
+  browser->GetHost()->Find(text, forward, /*matchCase=*/false,
+                           /*findNext=*/true);
+}
+
+void BrowserWindow::OnFindResult(CefRefPtr<CefBrowser> browser, int count,
+                                 int active_match_ordinal) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!find_count_) {
+    return;
+  }
+  if (count <= 0) {
+    find_count_->SetText("0/0");
+  } else {
+    find_count_->SetText(std::to_string(active_match_ordinal) + "/" +
+                         std::to_string(count));
+  }
 }
 
 void BrowserWindow::DragPoll(int seq) {
@@ -1767,8 +1871,58 @@ void BrowserWindow::BuildUI() {
   toolbar_->AddChildView(downloads_button_);
   tb_layout->SetFlexForView(address_bar_, 1);
 
+  // -- Find-in-page bar (hidden until Ctrl+F) --
+  find_bar_ = CefPanel::CreatePanel(nullptr);
+  find_bar_->SetID(ID_FIND_BAR);
+  find_bar_->SetBackgroundColor(kColorToolbarBg);
+  CefBoxLayoutSettings find_layout;
+  find_layout.horizontal = true;
+  find_layout.between_child_spacing = 6;
+  find_layout.inside_border_horizontal_spacing = 8;
+  find_layout.inside_border_vertical_spacing = 5;
+  find_layout.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+  CefRefPtr<CefBoxLayout> find_box = find_bar_->SetToBoxLayout(find_layout);
+
+  find_field_ = CefTextfield::CreateTextfield(this);
+  find_field_->SetID(ID_FIND_FIELD);
+  find_field_->SetFontList(kFontList);
+  find_field_->SetPlaceholderText("Find in page");
+  find_field_->SetAccessibleName("Find in page");
+
+  auto make_find_btn = [this](const char* label, int id, const char* tip) {
+    CefRefPtr<CefLabelButton> b = CefLabelButton::CreateLabelButton(this, label);
+    b->SetID(id);
+    b->SetFontList("Segoe UI, 14px");
+    b->SetInkDropEnabled(true);
+    b->SetFocusable(false);
+    b->SetMinimumSize(CefSize(30, 28));
+    b->SetMaximumSize(CefSize(30, 28));
+    b->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+    b->SetTextColor(CEF_BUTTON_STATE_NORMAL, kColorTextDim);
+    b->SetTextColor(CEF_BUTTON_STATE_HOVERED, kColorText);
+    b->SetTooltipText(tip);
+    return b;
+  };
+  // Match counter (a non-interactive label button).
+  find_count_ = make_find_btn("", ID_FIND_COUNT, "Matches");
+  find_count_->SetEnabled(false);
+  find_count_->SetMinimumSize(CefSize(64, 28));
+  find_count_->SetMaximumSize(CefSize(90, 28));
+  find_prev_ = make_find_btn("\xE2\x80\xB9", ID_FIND_PREV, "Previous (Shift+Enter)");
+  find_next_ = make_find_btn("\xE2\x80\xBA", ID_FIND_NEXT, "Next (Enter)");
+  find_close_ = make_find_btn("\xE2\x9C\x95", ID_FIND_CLOSE, "Close (Esc)");
+
+  find_bar_->AddChildView(find_field_);
+  find_bar_->AddChildView(find_count_);
+  find_bar_->AddChildView(find_prev_);
+  find_bar_->AddChildView(find_next_);
+  find_bar_->AddChildView(find_close_);
+  find_box->SetFlexForView(find_field_, 1);
+  find_bar_->SetVisible(false);
+
   window_->AddChildView(tab_strip_);
   window_->AddChildView(toolbar_);
+  window_->AddChildView(find_bar_);
 }
 
 void BrowserWindow::AddAccelerators() {
@@ -1804,6 +1958,8 @@ void BrowserWindow::AddAccelerators() {
                           true);
   window_->SetAccelerator(CMD_ZOOM_OUT, kVK_SUBTRACT, false, true, false, true);
   window_->SetAccelerator(CMD_ZOOM_RESET, '0', false, true, false, true);
+  // Find in page: Ctrl+F.
+  window_->SetAccelerator(CMD_FIND, 'F', false, true, false, true);
 }
 
 CefRefPtr<CefBrowserView> BrowserWindow::ActiveBrowserView() {

@@ -9,6 +9,7 @@
 
 #include "include/cef_client.h"
 #include "include/cef_context_menu_handler.h"
+#include "include/cef_find_handler.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_resource_request_handler.h"
@@ -20,6 +21,7 @@
 class OpenNyxClient : public CefClient,
                       public CefContextMenuHandler,
                       public CefDisplayHandler,
+                      public CefFindHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
                       public CefDownloadHandler,
@@ -37,6 +39,7 @@ class OpenNyxClient : public CefClient,
     return this;
   }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+  CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
@@ -48,6 +51,14 @@ class OpenNyxClient : public CefClient,
   void OnAddressChange(CefRefPtr<CefBrowser> browser,
                        CefRefPtr<CefFrame> frame,
                        const CefString& url) override;
+
+  // CefFindHandler: report find match counts to the window's find bar.
+  void OnFindResult(CefRefPtr<CefBrowser> browser,
+                    int identifier,
+                    int count,
+                    const CefRect& selection_rect,
+                    int active_match_ordinal,
+                    bool final_update) override;
 
   // CefContextMenuHandler methods: add "Inspect element" (dev console) to the
   // right-click menu, so DevTools are reachable without the keyboard shortcut.

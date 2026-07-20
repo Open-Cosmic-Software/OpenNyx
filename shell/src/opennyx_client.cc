@@ -68,6 +68,18 @@ void OpenNyxClient::OnAddressChange(CefRefPtr<CefBrowser> browser,
   }
 }
 
+void OpenNyxClient::OnFindResult(CefRefPtr<CefBrowser> browser,
+                                 int identifier,
+                                 int count,
+                                 const CefRect& selection_rect,
+                                 int active_match_ordinal,
+                                 bool final_update) {
+  CEF_REQUIRE_UI_THREAD();
+  if (BrowserWindow* window = BrowserWindow::Get()) {
+    window->OnFindResult(browser, count, active_match_ordinal);
+  }
+}
+
 void OpenNyxClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
                                          bool isLoading,
                                          bool canGoBack,

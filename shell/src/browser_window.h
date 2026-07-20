@@ -61,6 +61,11 @@ class BrowserWindow : public CefWindowDelegate,
   // Returns true if |browser| belonged to this window (i.e. was a tab).
   bool OnBrowserClosed(CefRefPtr<CefBrowser> browser);
 
+  // Find-in-page result callback (forwarded from the client): updates the
+  // "n/m" match counter in the find bar.
+  void OnFindResult(CefRefPtr<CefBrowser> browser, int count,
+                    int active_match_ordinal);
+
   // Returns the cached page title for |browser| (empty if unknown).
   std::string GetBrowserTitle(CefRefPtr<CefBrowser> browser);
 
@@ -250,6 +255,18 @@ class BrowserWindow : public CefWindowDelegate,
   // Persists the current open-tab URLs + active index so they can be restored
   // on next launch. Cheap; called whenever tabs change.
   void SaveSessionState();
+
+  // ---- Find-in-page ----
+  void ShowFindBar();
+  void HideFindBar();
+  void DoFind(bool forward);  // run/advance the search from the find field.
+  bool find_bar_visible_ = false;
+  CefRefPtr<CefPanel> find_bar_;
+  CefRefPtr<CefTextfield> find_field_;
+  CefRefPtr<CefLabelButton> find_count_;
+  CefRefPtr<CefLabelButton> find_prev_;
+  CefRefPtr<CefLabelButton> find_next_;
+  CefRefPtr<CefLabelButton> find_close_;
   // Frameless window controls.
   CefRefPtr<CefPanel> caption_spacer_;  // flexible drag area
   CefRefPtr<CefLabelButton> minimize_button_;
