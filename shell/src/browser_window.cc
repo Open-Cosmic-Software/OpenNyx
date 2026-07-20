@@ -1368,8 +1368,9 @@ void BrowserWindow::ShowCommandPalette() {
     }
 
     // CUSTOM docking lets us position/size the overlay ourselves (SetBounds).
-    palette_overlay_ =
-        window_->AddOverlayView(palette_panel_, CEF_DOCKING_MODE_CUSTOM);
+    // can_activate=true so the palette search field can take keyboard focus.
+    palette_overlay_ = window_->AddOverlayView(
+        palette_panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true);
   }
 
   palette_visible_ = true;
