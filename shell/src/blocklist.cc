@@ -109,7 +109,7 @@ const char* const kBundledDomains[] = {
     "nr-data.net", "insightexpressai.com", "adotmob.com", "id5-sync.com",
     "cdn.id5-sync.com", "cadmus.script.ac", "geoedge.be", "adhese.com",
     "browser-intake-datadoghq.com", "rum.browser-intake-datadoghq.com",
-    "cdn.mouseflow.com", "cdn.jsdelivr.net/npm/@analytics",
+    "cdn.mouseflow.com",
     "wcfbc.net", "d.agkn.com", "sync.mathtag.com", "eb2.3lift.com",
     "cnt.vibabpanel.com", "trackcmp.net", "count.im", "traffic.libsyn.com",
     "cdn.cxense.com", "cxense.com", "cdn.krxd.net", "beacon.krxd.net",
@@ -162,12 +162,14 @@ OpenNyxBlocklist::OpenNyxBlocklist() {
 void OpenNyxBlocklist::Load() {
   for (const char* d : kBundledDomains) {
     std::string entry = d;
-    // Some curated entries include a path segment (e.g. "t.co/i/adsct");
-    // reduce to the host part for the domain set. Path-based rules are only
-    // approximated at the host level for this compact list.
-    const size_t slash = entry.find('/');
-    if (slash != std::string::npos) {
-      entry = entry.substr(0, slash);
+    // Some curated entries include a path segment (e.g. "t.co/i/adsct").
+    // This blocklist matches on HOST only, so truncating such an entry to its
+    // bare host would over-block the entire domain (e.g. dropping the path from
+    // "cdn.jsdelivr.net/npm/@analytics" would block ALL of jsdelivr, breaking
+    // every site that loads libraries from it). Skip path-scoped rules instead
+    // of approximating them at the host level.
+    if (entry.find('/') != std::string::npos) {
+      continue;
     }
     if (!entry.empty()) {
       domains_.insert(ToLower(entry));
