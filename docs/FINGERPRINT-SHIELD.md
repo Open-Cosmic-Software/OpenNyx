@@ -35,3 +35,18 @@ shield; those checks must then fail. WebGL checks only run where Chromium has
 WebGL (they are reported as skipped otherwise, never as green).
 Manual check in the built browser: <https://coveryourtracks.eff.org> and
 <https://abrahamjuliot.github.io/creepjs/>, before and after.
+
+## Result in the built browser (18 Oct 2026, Windows, build 0d86f97)
+
+Tested by Fabian on <https://coveryourtracks.eff.org>:
+
+- First run (shield on): "unique fingerprint". Expected: the shield keeps
+  values stable per site and session, so one visit alone looks unique.
+  Audio value 124.04347560270253 (stock Chrome on Windows is usually around
+  124.0434752…).
+- Second run after restart (shield on): **"your browser has a randomized
+  fingerprint"**. That is EFF's verdict when the fingerprint changes between
+  visits, which is the goal.
+
+Not covered by the shield and still "No" on that page: blocking tracking ads
+and invisible trackers. That is the blocklist, a separate topic.
