@@ -67,6 +67,7 @@ M3/M4 features below. See the Actions tab for the latest run.
 | **Settings** (`opennyx://settings`, persisted config) | ✅ |
 | **Tracker/ad blocking** (bundled blocklist + shield count) | ✅ |
 | **DNS-over-HTTPS** (secure mode, resolver choice) | ✅ |
+| **Fingerprint shield** (canvas/WebGL/audio noise, GPU string, per site + session, [doc](FINGERPRINT-SHIELD.md)) | 🧪 branch feat/fingerprint-shield, not yet tested in the built browser |
 | **Network audit** doc (`docs/NETWORK-AUDIT.md`) | ✅ |
 | Address-bar history autocomplete | ⏳ deferred (helper exists, not wired to the Views textfield) |
 | Bookmarks bar under toolbar | ⏳ deferred (nice-to-have) |

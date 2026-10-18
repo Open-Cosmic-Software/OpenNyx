@@ -60,6 +60,7 @@ struct AppConfig {
   std::string homepage = "opennyx://newtab";
   bool blocking_enabled = true;
   bool doh_enabled = true;
+  bool fingerprint_shield = true;  // fp_shield.h, applied to new renderers
   std::string doh_resolver = "quad9";  // quad9(default)|dns0|mullvad|cloudflare|custom
   std::string doh_custom_template;
 };

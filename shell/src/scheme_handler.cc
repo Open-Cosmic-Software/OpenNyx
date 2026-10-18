@@ -195,6 +195,8 @@ CefRefPtr<CefResourceHandler> HandleApi(const std::string& endpoint,
         c.homepage = j.value("homepage", c.homepage);
         c.blocking_enabled = j.value("blocking_enabled", c.blocking_enabled);
         c.doh_enabled = j.value("doh_enabled", c.doh_enabled);
+        c.fingerprint_shield =
+            j.value("fingerprint_shield", c.fingerprint_shield);
         c.doh_resolver = j.value("doh_resolver", c.doh_resolver);
         c.doh_custom_template =
             j.value("doh_custom_template", c.doh_custom_template);
@@ -209,6 +211,7 @@ CefRefPtr<CefResourceHandler> HandleApi(const std::string& endpoint,
     j["homepage"] = c.homepage;
     j["blocking_enabled"] = c.blocking_enabled;
     j["doh_enabled"] = c.doh_enabled;
+    j["fingerprint_shield"] = c.fingerprint_shield;
     j["doh_resolver"] = c.doh_resolver;
     j["doh_custom_template"] = c.doh_custom_template;
     return JsonResponse(j);

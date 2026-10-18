@@ -245,6 +245,8 @@ void OpenNyxStore::LoadLocked() {
         config_.blocking_enabled =
             j.value("blocking_enabled", config_.blocking_enabled);
         config_.doh_enabled = j.value("doh_enabled", config_.doh_enabled);
+        config_.fingerprint_shield =
+            j.value("fingerprint_shield", config_.fingerprint_shield);
         config_.doh_resolver = j.value("doh_resolver", config_.doh_resolver);
         config_.doh_custom_template =
             j.value("doh_custom_template", config_.doh_custom_template);
@@ -525,6 +527,7 @@ void OpenNyxStore::SaveConfigLocked() {
   j["homepage"] = config_.homepage;
   j["blocking_enabled"] = config_.blocking_enabled;
   j["doh_enabled"] = config_.doh_enabled;
+  j["fingerprint_shield"] = config_.fingerprint_shield;
   j["doh_resolver"] = config_.doh_resolver;
   j["doh_custom_template"] = config_.doh_custom_template;
   WriteFileAtomic(PathFor("config.json"), j.dump(2));

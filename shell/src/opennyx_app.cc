@@ -8,12 +8,14 @@
 
 #include "include/cef_browser.h"
 #include "include/cef_command_line.h"
+#include "include/cef_v8.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 
 #include "blocklist.h"
+#include "fp_shield.h"
 #include "browser_window.h"
 #include "opennyx_client.h"
 #include "scheme_handler.h"
@@ -40,6 +42,14 @@ std::string DohTemplateFor(const AppConfig& cfg) {
   }
   // Default: Quad9 (Switzerland, non-profit, no-log, malware-blocking).
   return "https://dns.quad9.net/dns-query";
+}
+
+// One random seed per browser session (browser process only). Same seed for
+// every renderer, so a site sees stable noise while you browse it; a restart
+// gives every site a new fingerprint.
+const std::string& SessionFingerprintSeed() {
+  static const std::string seed = NewFingerprintSeed();
+  return seed;
 }
 
 }  // namespace
@@ -134,6 +144,36 @@ void OpenNyxApp::OnContextInitialized() {
   // Create the main browser window (tab strip + toolbar + first tab) using
   // the CEF Views framework. It shows itself after creation.
   BrowserWindow::Create(url);
+}
+
+void OpenNyxApp::OnBeforeChildProcessLaunch(
+    CefRefPtr<CefCommandLine> command_line) {
+  // Renderers read the seed from here. No switch = shield off (setting off).
+  if (OpenNyxStore::Get()->GetConfig().fingerprint_shield) {
+    command_line->AppendSwitchWithValue(kFingerprintSeedSwitch,
+                                        SessionFingerprintSeed());
+  }
+}
+
+void OpenNyxApp::OnContextCreated(CefRefPtr<CefBrowser> browser,
+                                  CefRefPtr<CefFrame> frame,
+                                  CefRefPtr<CefV8Context> context) {
+  // Render process. Runs before any script of the page itself.
+  static const std::string seed =
+      CefCommandLine::GetGlobalCommandLine()->GetSwitchValue(
+          kFingerprintSeedSwitch);
+  if (seed.empty()) return;  // shield disabled in settings
+  const std::string url = frame->GetURL();
+  // Web pages only (incl. about:blank/srcdoc frames, which inherit their
+  // parent's origin); never our own opennyx:// pages or devtools.
+  if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0 &&
+      url.rfind("about:", 0) != 0) {
+    return;
+  }
+  static const std::string js = BuildFingerprintShield(seed);
+  CefRefPtr<CefV8Value> retval;
+  CefRefPtr<CefV8Exception> exception;
+  context->Eval(js, url, 0, retval, exception);
 }
 
 CefRefPtr<CefClient> OpenNyxApp::GetDefaultClient() {

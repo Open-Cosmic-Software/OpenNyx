@@ -83,6 +83,8 @@ set(OPENNYX_SRCS
   src/store.h
   src/blocklist.cc
   src/blocklist.h
+  src/fp_shield.cc
+  src/fp_shield.h
   src/pages.cc
   src/pages.h
   src/scheme_handler.cc

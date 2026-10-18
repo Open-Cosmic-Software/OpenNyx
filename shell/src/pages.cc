@@ -242,6 +242,7 @@ api('config').then(c=>{
   parts.push('de-googled at runtime');
   parts.push(c.blocking_enabled?'tracker blocking on':'tracker blocking off');
   parts.push(c.doh_enabled?'DoH on':'DoH off');
+  parts.push(c.fingerprint_shield!==false?'fingerprint shield on':'fingerprint shield off');
   document.getElementById('foot').textContent=parts.join(' · ');
 });
 )JS";
@@ -534,6 +535,11 @@ std::string SettingsPage() {
     <small id="blkInfo">Bundled blocklist</small></div>
     <label class="switch"><input type="checkbox" id="blocking">
       <span class="slider"></span></label></div>
+  <div class="field"><div class="lbl">Fingerprint shield
+    <small>Adds invisible noise to canvas, WebGL and audio, hides your GPU
+      model. Per site and per session. Applies to new tabs.</small></div>
+    <label class="switch"><input type="checkbox" id="fpShield">
+      <span class="slider"></span></label></div>
   <div class="field"><div class="lbl">DNS-over-HTTPS (DoH)
     <small>Encrypts DNS lookups. Takes full effect after restart.</small></div>
     <label class="switch"><input type="checkbox" id="doh">
@@ -582,6 +588,7 @@ function fill(){
   document.getElementById('homepage').value=cfg.homepage||'opennyx://newtab';
   document.getElementById('blocking').checked=!!cfg.blocking_enabled;
   document.getElementById('doh').checked=!!cfg.doh_enabled;
+  document.getElementById('fpShield').checked=cfg.fingerprint_shield!==false;
   document.getElementById('resolver').value=cfg.doh_resolver||'quad9';
   document.getElementById('dohCustom').value=cfg.doh_custom_template||'';
   toggleCustom();
@@ -600,6 +607,7 @@ async function save(){
   cfg.homepage=document.getElementById('homepage').value.trim()||'opennyx://newtab';
   cfg.blocking_enabled=document.getElementById('blocking').checked;
   cfg.doh_enabled=document.getElementById('doh').checked;
+  cfg.fingerprint_shield=document.getElementById('fpShield').checked;
   cfg.doh_resolver=document.getElementById('resolver').value;
   cfg.doh_custom_template=document.getElementById('dohCustom').value.trim();
   await api('config',{method:'POST',headers:{'content-type':'application/json'},
