@@ -45,8 +45,20 @@ class OpenNyxBlocklist {
   // (never user-facing services like google.com search or googlevideo).
   bool ShouldBlockGooglePhoneHome(const std::string& host);
 
-  // Total number of domains in the bundled list.
+  // Total number of domains (bundled + loaded list files).
   size_t size() const { return domains_.size(); }
+
+  // Loads an Adblock-Plus style list file (EasyPrivacy etc.). Only plain
+  // host rules are used: "||host^" and "||host^$third-party". Everything
+  // with other options, paths or wildcards is skipped (a host-only matcher
+  // would over-block them). "@@||host^" exceptions remove a host again.
+  // Returns the number of hosts added, -1 if the file could not be read.
+  int LoadListFile(const std::string& path);
+
+  // Parses list |text| into |block| / |allow| (exposed for tests).
+  static void ParseAbpHosts(const std::string& text,
+                            std::unordered_set<std::string>* block,
+                            std::unordered_set<std::string>* allow);
 
   // ---- Per-site counters (keyed by the first-party host) ----
   void RecordBlock(const std::string& first_party_host);

@@ -55,6 +55,28 @@ jobs:
           # Drop debug-only leftovers to keep the zip lean.
           Remove-Item -ErrorAction SilentlyContinue dist/*.pdb, dist/*.lib, dist/*.exp
 
+      # EasyPrivacy ships as a separate data file next to the exe (not part of
+      # the MIT source). Fetched at BUILD time, so the browser itself never
+      # downloads it. Fail the build if it is missing or not the real list.
+      - name: Bundle EasyPrivacy blocklist
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist/blocklists -Force | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri "https://easylist.to/easylist/easyprivacy.txt" -OutFile dist/blocklists/easyprivacy.txt
+          $t = Get-Content dist/blocklists/easyprivacy.txt -Raw
+          if ($t -notmatch "! Title: EasyPrivacy") { Write-Error "not the EasyPrivacy list"; exit 1 }
+          if ($t -notmatch "\|\|trackersimulator\.org\^") { Write-Error "EasyPrivacy without trackersimulator.org"; exit 1 }
+          $n = ([regex]::Matches($t, "(?m)^\|\|[a-z0-9.-]+\^")).Count
+          if ($n -lt 10000) { Write-Error "only $n host rules"; exit 1 }
+          Write-Host "EasyPrivacy: $n host rules"
+          @"
+          EasyPrivacy (https://easylist.to/) by The EasyList authors.
+          Dual licensed under GPL v3 (or later) and Creative Commons
+          Attribution-ShareAlike 3.0 Unported. Shipped unmodified as a separate
+          data file; OpenNyx itself is MIT licensed.
+          Updates: replace this file with a newer easyprivacy.txt.
+          "@ | Set-Content dist/blocklists/EASYPRIVACY-LICENSE.txt
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

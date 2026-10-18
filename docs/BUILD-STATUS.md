@@ -66,6 +66,7 @@ M3/M4 features below. See the Actions tab for the latest run.
 | **Downloads** (DownloadHandler + `opennyx://downloads`) | ✅ |
 | **Settings** (`opennyx://settings`, persisted config) | ✅ |
 | **Tracker/ad blocking** (bundled blocklist + shield count) | ✅ |
+| **EasyPrivacy** (~47k hosts, `blocklists/easyprivacy.txt` next to the exe, fetched at build time) | 🧪 branch feat/easyprivacy-list |
 | **DNS-over-HTTPS** (secure mode, resolver choice) | ✅ |
 | **Fingerprint shield** (canvas/WebGL/audio noise, GPU string, per site + session, [doc](FINGERPRINT-SHIELD.md)) | ✅ EFF Cover Your Tracks: "randomized fingerprint" (18 Oct 2026) |
 | **Network audit** doc (`docs/NETWORK-AUDIT.md`) | ✅ |

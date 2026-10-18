@@ -9,10 +9,21 @@
 // We embed a compact curated subset (not the full multi-hundred-thousand-line
 // lists) to keep the binary lean; the list is loaded once into a hash set.
 // Matching is domain-suffix based (see ShouldBlock).
+//
+// On top of that, the release build ships EasyPrivacy as a SEPARATE data file
+// (blocklists/easyprivacy.txt next to opennyx.exe, with its own licence file;
+// it is not part of this MIT source). It is read from disk at startup, so the
+// browser itself makes no request to fetch it.
 
 #include "blocklist.h"
 
 #include <algorithm>
+#include <fstream>
+#include <sstream>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -147,7 +158,88 @@ std::string LastTwoLabels(const std::string& host) {
   return host.substr(prev_dot + 1);
 }
 
+bool IsHostChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' ||
+         c == '-' || c == '_';
+}
+
+// Directory of the running executable ("" if unknown).
+std::string ExeDir() {
+#if defined(_WIN32)
+  wchar_t buf[MAX_PATH];
+  const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+  if (n == 0 || n >= MAX_PATH) return "";
+  std::wstring w(buf, n);
+  const size_t slash = w.find_last_of(L"\\/");
+  if (slash == std::wstring::npos) return "";
+  w.resize(slash);
+  const int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0,
+                                      nullptr, nullptr);
+  if (len <= 0) return "";
+  std::string out(static_cast<size_t>(len - 1), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, out.data(), len, nullptr,
+                      nullptr);
+  return out;
+#else
+  return "";
+#endif
+}
+
 }  // namespace
+
+// static
+void OpenNyxBlocklist::ParseAbpHosts(const std::string& text,
+                                     std::unordered_set<std::string>* block,
+                                     std::unordered_set<std::string>* allow) {
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    bool exception = false;
+    size_t p = 0;
+    if (line.compare(0, 4, "@@||") == 0) {
+      exception = true;
+      p = 4;
+    } else if (line.compare(0, 2, "||") == 0) {
+      p = 2;
+    } else {
+      continue;  // comments, cosmetic rules, path rules, regexes
+    }
+    const size_t caret = line.find('^', p);
+    if (caret == std::string::npos || caret == p) continue;
+    std::string host = ToLower(line.substr(p, caret - p));
+    bool ok = host.find('.') != std::string::npos && host.front() != '.' &&
+              host.back() != '.';
+    for (char c : host) ok = ok && IsHostChar(c);
+    if (!ok) continue;
+    const std::string rest = line.substr(caret + 1);
+    if (exception) {
+      // Any exception for a host, whatever its options, wins: never block
+      // something the list maintainers had to un-break.
+      allow->insert(host);
+      continue;
+    }
+    if (rest.empty() || rest == "$third-party" || rest == "$3p") {
+      block->insert(host);
+    }
+  }
+}
+
+int OpenNyxBlocklist::LoadListFile(const std::string& path) {
+  std::ifstream f(path, std::ios::binary);
+  if (!f) return -1;
+  std::stringstream ss;
+  ss << f.rdbuf();
+  std::unordered_set<std::string> block, allow;
+  ParseAbpHosts(ss.str(), &block, &allow);
+  int added = 0;
+  for (const auto& h : block) {
+    if (allow.count(h)) continue;
+    if (domains_.insert(h).second) ++added;
+  }
+  for (const auto& h : allow) domains_.erase(h);
+  return added;
+}
 
 // static
 OpenNyxBlocklist* OpenNyxBlocklist::Get() {
@@ -174,6 +266,12 @@ void OpenNyxBlocklist::Load() {
     if (!entry.empty()) {
       domains_.insert(ToLower(entry));
     }
+  }
+  // Release builds ship EasyPrivacy next to the exe. Missing file (dev build)
+  // = bundled list only.
+  const std::string dir = ExeDir();
+  if (!dir.empty()) {
+    LoadListFile(dir + "\\blocklists\\easyprivacy.txt");
   }
 }
 
